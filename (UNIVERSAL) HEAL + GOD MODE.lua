@@ -25,11 +25,21 @@ local L = {
     healButton = "HEAL"
 }
 
+local function safeNotify(title, text, duration)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = title,
+            Text = text,
+            Duration = duration or 2
+        })
+    end)
+end
+
 local function getCharacter()
     local success, result = pcall(function()
-        return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait(5)
     end)
-    if success then
+    if success and result then
         return result
     end
     return nil
@@ -41,13 +51,7 @@ local function healToFull()
     local humanoid = character:FindFirstChild("Humanoid")
     if humanoid then
         humanoid.Health = humanoid.MaxHealth
-        pcall(function()
-            StarterGui:SetCore("SendNotification", {
-                Title = L.heal,
-                Text = L.healed,
-                Duration = 1
-            })
-        end)
+        safeNotify(L.heal, L.healed, 1)
     end
 end
 
@@ -81,24 +85,9 @@ local function enableGodMode()
                 end
             end
         end)
-        
-        pcall(function()
-            for _, v in pairs(ReplicatedStorage:GetDescendants()) do
-                if v:IsA("RemoteEvent") and v.Name:lower():find("damage") or v.Name:lower():find("hit") then
-                    local oldFire = v.FireServer
-                    v.FireServer = function() end
-                end
-            end
-        end)
     end
     
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {
-            Title = L.godMode,
-            Text = L.godOn,
-            Duration = 2
-        })
-    end)
+    safeNotify(L.godMode, L.godOn, 2)
 end
 
 local function disableGodMode()
@@ -107,13 +96,7 @@ local function disableGodMode()
         DamageConnection:Disconnect()
         DamageConnection = nil
     end
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {
-            Title = L.godMode,
-            Text = L.godOff,
-            Duration = 1
-        })
-    end)
+    safeNotify(L.godMode, L.godOff, 1)
 end
 
 local function toggleGodMode()
@@ -142,73 +125,62 @@ if isMobile then
             ScreenGui.Parent = PlayerGui
         end
         
-        local GodButton = Instance.new("ImageButton")
+        local GodButton = Instance.new("TextButton")
         GodButton.Size = UDim2.new(0, 70, 0, 70)
         GodButton.Position = UDim2.new(0.5, -75, 0.9, -35)
         GodButton.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
         GodButton.BackgroundTransparency = 0.2
+        GodButton.Text = "👑\n" .. L.godButton
+        GodButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        GodButton.TextScaled = true
+        GodButton.Font = Enum.Font.GothamBold
         GodButton.Parent = ScreenGui
         
-        local GodCorner = Instance.new("UICorner")
-        GodCorner.CornerRadius = UDim.new(1, 0)
-        GodCorner.Parent = GodButton
-        
-        local GodText = Instance.new("TextLabel")
-        GodText.Size = UDim2.new(1, 0, 1, 0)
-        GodText.BackgroundTransparency = 1
-        GodText.Text = "👑\n" .. L.godButton
-        GodText.TextColor3 = Color3.fromRGB(255, 255, 255)
-        GodText.TextScaled = true
-        GodText.Font = Enum.Font.GothamBold
-        GodText.Parent = GodButton
-        
-        local HealButton = Instance.new("ImageButton")
+        local HealButton = Instance.new("TextButton")
         HealButton.Size = UDim2.new(0, 70, 0, 70)
         HealButton.Position = UDim2.new(0.5, 5, 0.9, -35)
         HealButton.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
         HealButton.BackgroundTransparency = 0.2
+        HealButton.Text = "💚\n" .. L.healButton
+        HealButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        HealButton.TextScaled = true
+        HealButton.Font = Enum.Font.GothamBold
         HealButton.Parent = ScreenGui
         
-        local HealCorner = Instance.new("UICorner")
-        HealCorner.CornerRadius = UDim.new(1, 0)
-        HealCorner.Parent = HealButton
-        
-        local HealText = Instance.new("TextLabel")
-        HealText.Size = UDim2.new(1, 0, 1, 0)
-        HealText.BackgroundTransparency = 1
-        HealText.Text = "💚\n" .. L.healButton
-        HealText.TextColor3 = Color3.fromRGB(255, 255, 255)
-        HealText.TextScaled = true
-        HealText.Font = Enum.Font.GothamBold
-        HealText.Parent = HealButton
+        local function roundCorners(btn)
+            local c = Instance.new("UICorner")
+            c.CornerRadius = UDim.new(1, 0)
+            c.Parent = btn
+        end
+        roundCorners(GodButton)
+        roundCorners(HealButton)
         
         GodButton.MouseButton1Click:Connect(toggleGodMode)
         HealButton.MouseButton1Click:Connect(healToFull)
         
-        local function makeDraggable(button)
+        local function makeDraggable(btn)
             local dragging = false
             local dragStart
             local startPos
-            button.InputBegan:Connect(function(input)
+            btn.InputBegan:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.Touch then
                     dragging = true
                     dragStart = input.Position
-                    startPos = button.Position
+                    startPos = btn.Position
                 end
             end)
-            button.InputChanged:Connect(function(input)
+            btn.InputChanged:Connect(function(input)
                 if dragging and input.UserInputType == Enum.UserInputType.Touch then
                     local delta = input.Position - dragStart
-                    button.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+                    btn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
                 end
             end)
-            button.InputEnded:Connect(function(input)
+            btn.InputEnded:Connect(function(input)
                 if input.UserInputType == Enum.UserInputType.Touch then
                     dragging = false
                 end
             end)
         end
-        
         makeDraggable(GodButton)
         makeDraggable(HealButton)
     end)
@@ -221,7 +193,7 @@ pcall(function()
             healToFull()
         elseif input.KeyCode == Enum.KeyCode.Delete then
             toggleGodMode()
-        elseif input.KeyCode == Enum.KeyCode.End then
+        elseif input.KeyCode == Enum.KeyCode.End and not isMobile then
             if not AdminPanelVisible then
                 showAdminLogin()
             else
@@ -234,8 +206,8 @@ pcall(function()
     end)
 end)
 
-LocalPlayer.CharacterAdded:Connect(function(newChar)
-    wait(1)
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
     if GodModeActive then
         enableGodMode()
     end
@@ -270,6 +242,20 @@ local function showAdminLogin()
         title.Font = Enum.Font.GothamBold
         title.Parent = frame
         
+        local closeBtn = Instance.new("TextButton")
+        closeBtn.Size = UDim2.new(0, 25, 0, 25)
+        closeBtn.Position = UDim2.new(1, -30, 0, 8)
+        closeBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+        closeBtn.Text = "✕"
+        closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        closeBtn.TextScaled = true
+        closeBtn.Font = Enum.Font.GothamBold
+        closeBtn.Parent = title
+        
+        closeBtn.MouseButton1Click:Connect(function()
+            loginGui:Destroy()
+        end)
+        
         local input = Instance.new("TextBox")
         input.Size = UDim2.new(0.8, 0, 0, 35)
         input.Position = UDim2.new(0.1, 0, 0.5, -20)
@@ -298,39 +284,19 @@ local function showAdminLogin()
         btnCorner.CornerRadius = UDim.new(0, 5)
         btnCorner.Parent = loginBtn
         
-        local closeBtn = Instance.new("TextButton")
-        closeBtn.Size = UDim2.new(0, 25, 0, 25)
-        closeBtn.Position = UDim2.new(1, -30, 0, 8)
-        closeBtn.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
-        closeBtn.Text = "✕"
-        closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        closeBtn.TextScaled = true
-        closeBtn.Font = Enum.Font.GothamBold
-        closeBtn.Parent = title
-        
-        closeBtn.MouseButton1Click:Connect(function()
-            loginGui:Destroy()
-        end)
-        
-        loginBtn.MouseButton1Click:Connect(function()
+        local function checkPassword()
             if input.Text == "HH-HUB|ADMIN" or input.Text == "S1R0TA" then
                 loginGui:Destroy()
                 showAdminPanel()
             else
-                pcall(function()
-                    StarterGui:SetCore("SendNotification", {
-                        Title = "❌ Access Denied",
-                        Text = "Invalid password",
-                        Duration = 2
-                    })
-                end)
+                safeNotify("❌ Access Denied", "Invalid password", 2)
             end
-        end)
+        end
         
+        loginBtn.MouseButton1Click:Connect(checkPassword)
         input.FocusLost:Connect(function()
-            if input.Text == "HH-HUB|ADMIN" or input.Text == "S1R0TA" then
-                loginGui:Destroy()
-                showAdminPanel()
+            if input.Text ~= "" then
+                checkPassword()
             end
         end)
     end)
@@ -338,7 +304,6 @@ end
 
 local function showAdminPanel()
     AdminPanelVisible = true
-    
     AdminFrame = Instance.new("ScreenGui")
     AdminFrame.Name = "AdminPanel"
     AdminFrame.ResetOnSpawn = false
@@ -360,7 +325,7 @@ local function showAdminPanel()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 40)
     title.BackgroundColor3 = Color3.fromRGB(30, 20, 50)
-    title.Text = "👑 HH-HUB ADMIN PANEL 👑"
+    title.Text = "👑 ADMIN PANEL 👑"
     title.TextColor3 = Color3.fromRGB(255, 215, 0)
     title.TextScaled = true
     title.Font = Enum.Font.GothamBold
@@ -445,7 +410,7 @@ local function showAdminPanel()
     killBtn.Size = UDim2.new(0.8, 0, 0, 35)
     killBtn.Position = UDim2.new(0.1, 0, 0, 80)
     killBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-    killBtn.Text = "💀 KILL PLAYER"
+    killBtn.Text = "💀 KILL"
     killBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     killBtn.TextScaled = true
     killBtn.Font = Enum.Font.GothamBold
@@ -465,7 +430,7 @@ local function showAdminPanel()
     kickBtn.Size = UDim2.new(0.8, 0, 0, 35)
     kickBtn.Position = UDim2.new(0.1, 0, 0, 165)
     kickBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 0)
-    kickBtn.Text = "👢 KICK PLAYER"
+    kickBtn.Text = "👢 KICK"
     kickBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     kickBtn.TextScaled = true
     kickBtn.Font = Enum.Font.GothamBold
@@ -475,7 +440,7 @@ local function showAdminPanel()
     notifyBox.Size = UDim2.new(0.8, 0, 0, 30)
     notifyBox.Position = UDim2.new(0.1, 0, 0, 215)
     notifyBox.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
-    notifyBox.PlaceholderText = "Notification message..."
+    notifyBox.PlaceholderText = "Notification..."
     notifyBox.Text = ""
     notifyBox.TextColor3 = Color3.fromRGB(255, 255, 255)
     notifyBox.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
@@ -485,7 +450,7 @@ local function showAdminPanel()
     notifyBtn.Size = UDim2.new(0.8, 0, 0, 35)
     notifyBtn.Position = UDim2.new(0.1, 0, 0, 255)
     notifyBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 255)
-    notifyBtn.Text = "📨 SEND NOTIFICATION"
+    notifyBtn.Text = "📨 NOTIFY"
     notifyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     notifyBtn.TextScaled = true
     notifyBtn.Font = Enum.Font.GothamBold
@@ -495,7 +460,7 @@ local function showAdminPanel()
     infoBtn.Size = UDim2.new(0.8, 0, 0, 35)
     infoBtn.Position = UDim2.new(0.1, 0, 0, 305)
     infoBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
-    infoBtn.Text = "ℹ️ PLAYER INFO"
+    infoBtn.Text = "ℹ️ INFO"
     infoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     infoBtn.TextScaled = true
     infoBtn.Font = Enum.Font.GothamBold
@@ -510,12 +475,10 @@ local function showAdminPanel()
                     v:Destroy()
                 end
             end
-            
             for _, plr in pairs(Players:GetPlayers()) do
                 if plr ~= LocalPlayer then
                     local btn = Instance.new("TextButton")
                     btn.Size = UDim2.new(1, -10, 0, 30)
-                    btn.Position = UDim2.new(0, 5, 0, 0)
                     btn.BackgroundColor3 = Color3.fromRGB(50, 45, 65)
                     btn.Text = plr.Name
                     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -523,9 +486,9 @@ local function showAdminPanel()
                     btn.Font = Enum.Font.Gotham
                     btn.Parent = playerList
                     
-                    local btnCorner = Instance.new("UICorner")
-                    btnCorner.CornerRadius = UDim.new(0, 5)
-                    btnCorner.Parent = btn
+                    local c = Instance.new("UICorner")
+                    c.CornerRadius = UDim.new(0, 5)
+                    c.Parent = btn
                     
                     btn.MouseButton1Click:Connect(function()
                         selectedPlayer = plr
@@ -538,25 +501,11 @@ local function showAdminPanel()
     
     updatePlayerList()
     
-    local function getDevice(player)
-        local platform = "PC"
-        pcall(function()
-            if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
-                platform = "Mobile"
-            end
-        end)
-        return platform
-    end
-    
     killBtn.MouseButton1Click:Connect(function()
         if selectedPlayer and selectedPlayer.Character and selectedPlayer.Character:FindFirstChild("Humanoid") then
             pcall(function()
                 selectedPlayer.Character.Humanoid.Health = 0
-                StarterGui:SetCore("SendNotification", {
-                    Title = "💀 KILLED",
-                    Text = selectedPlayer.Name .. " has been killed",
-                    Duration = 2
-                })
+                safeNotify("💀 KILLED", selectedPlayer.Name .. " killed", 2)
             end)
         end
     end)
@@ -564,16 +513,10 @@ local function showAdminPanel()
     kickBtn.MouseButton1Click:Connect(function()
         if selectedPlayer then
             local reason = kickBox.Text
-            if reason == "" then
-                reason = "Kicked by admin"
-            end
+            if reason == "" then reason = "Kicked" end
             pcall(function()
                 selectedPlayer:Kick(reason)
-                StarterGui:SetCore("SendNotification", {
-                    Title = "👢 KICKED",
-                    Text = selectedPlayer.Name .. " kicked: " .. reason,
-                    Duration = 2
-                })
+                safeNotify("👢 KICKED", selectedPlayer.Name .. " kicked", 2)
             end)
         end
     end)
@@ -581,44 +524,31 @@ local function showAdminPanel()
     notifyBtn.MouseButton1Click:Connect(function()
         if selectedPlayer then
             local msg = notifyBox.Text
-            if msg == "" then
-                msg = "Hello from admin!"
-            end
+            if msg == "" then msg = "Hello!" end
             pcall(function()
-                StarterGui:SetCore("SendNotification", {
-                    Title = "📨 Admin Message",
-                    Text = msg,
-                    Duration = 3
-                })
+                safeNotify("📨 Admin", msg, 3)
             end)
         end
     end)
     
     infoBtn.MouseButton1Click:Connect(function()
         if selectedPlayer then
-            local device = getDevice(selectedPlayer)
+            local device = "PC"
             pcall(function()
-                StarterGui:SetCore("SendNotification", {
-                    Title = "ℹ️ Player Info",
-                    Text = selectedPlayer.Name .. "\nDevice: " .. device,
-                    Duration = 3
-                })
+                if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+                    device = "Mobile"
+                end
             end)
+            safeNotify("ℹ️ Info", selectedPlayer.Name .. "\nDevice: " .. device, 3)
         end
     end)
     
     while AdminPanelVisible do
-        wait(2)
+        task.wait(3)
         if AdminPanelVisible then
             pcall(updatePlayerList)
         end
     end
 end
 
-pcall(function()
-    StarterGui:SetCore("SendNotification", {
-        Title = "💚👑 GOD MODE",
-        Text = "INSERT heal | DELETE God",
-        Duration = 4
-    })
-end)
+safeNotify("💚👑 LOADED", "INSERT heal | DELETE God", 4)
