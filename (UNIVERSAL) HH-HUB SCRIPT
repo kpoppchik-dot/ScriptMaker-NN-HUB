@@ -1,4 +1,7 @@
-local _S=game:GetService
+local _S = function(obj, service)
+    return obj:GetService(service)
+end
+
 local Players=_S(game,"Players")
 local UIS=_S(game,"UserInputService")
 local SG=_S(game,"StarterGui")
