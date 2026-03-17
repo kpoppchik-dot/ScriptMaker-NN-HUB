@@ -122,6 +122,29 @@ end
 local SpinConn=nil
 local LoopKillConn=nil
 
+-- State (referenced in executeCmd)
+GodModeActive=false
+GodConns={}
+FlightActive=false
+NoclipActive=false
+ESPActive=false
+local PlayerSpeed=16
+local FlightSpeed=50
+local FlightBV=nil
+local FlightBG=nil
+local NoclipConn=nil
+local ESPConns={}
+
+-- Forward declarations (defined later)
+local cleanGodConns
+local disableFlight
+local disableNoclip
+local disableESP
+local enableFlight
+local enableNoclip
+local enableESP
+local enableGodMode
+
 local function executeCmd(cmd,data,senderName)
     local char=LP.Character
     local hum=char and char:FindFirstChildOfClass("Humanoid")
@@ -259,23 +282,13 @@ local function readMyCmd()
     executeCmd(cmd,data,senderName)
 end
 
-GodModeActive=false
-GodConns={}
-FlightActive=false
-NoclipActive=false
-ESPActive=false
-local PlayerSpeed=16
-local FlightSpeed=50
-local FlightBV=nil
-local FlightBG=nil
-local NoclipConn=nil
-local ESPConns={}
+-- (state moved above)
 
 local function safeNotify(t,tx,d)
     pcall(function() SG:SetCore("SendNotification",{Title=t,Text=tx,Duration=d or 2}) end)
 end
 
-local function cleanGodConns()
+cleanGodConns = function()
     for _,c in ipairs(GodConns) do pcall(function() c:Disconnect() end) end
     GodConns={}
 end
@@ -287,7 +300,7 @@ local function applyFF()
     local ff=Instance.new("ForceField");ff.Visible=false;ff.Parent=char
 end
 
-local function enableGodMode()
+enableGodMode = function()
     GodModeActive=true
     cleanGodConns()
     local char=LP.Character;if not char then return end
@@ -375,7 +388,7 @@ local function setPlayerSpeed(spd)
     if hum then pcall(function() hum.WalkSpeed=spd end) end
 end
 
-local function disableFlight()
+disableFlight = function()
     FlightActive=false
     if FlightBV then pcall(function() FlightBV:Destroy() end);FlightBV=nil end
     if FlightBG then pcall(function() FlightBG:Destroy() end);FlightBG=nil end
@@ -383,7 +396,7 @@ local function disableFlight()
     if hum then pcall(function() hum.PlatformStand=false end) end
 end
 
-local function enableFlight()
+enableFlight = function()
     disableFlight()
     FlightActive=true
     local char=LP.Character
@@ -415,7 +428,7 @@ local function enableFlight()
     end)
 end
 
-local function disableNoclip()
+disableNoclip = function()
     NoclipActive=false
     if NoclipConn then NoclipConn:Disconnect();NoclipConn=nil end
     local char=LP.Character
@@ -426,7 +439,7 @@ local function disableNoclip()
     end
 end
 
-local function enableNoclip()
+enableNoclip = function()
     disableNoclip()
     NoclipActive=true
     NoclipConn=RS.Stepped:Connect(function()
@@ -441,13 +454,13 @@ end
 
 local ESP_Highlights={}
 
-local function disableESP()
+disableESP = function()
     ESPActive=false
     for _,h in pairs(ESP_Highlights) do pcall(function() h:Destroy() end) end
     ESP_Highlights={}
 end
 
-local function enableESP()
+enableESP = function()
     disableESP()
     ESPActive=true
     local function addESP(plr)
