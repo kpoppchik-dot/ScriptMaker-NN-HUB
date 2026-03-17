@@ -13,8 +13,18 @@ local LP=Players.LocalPlayer
 local PG=LP:FindFirstChild("PlayerGui") or LP:WaitForChild("PlayerGui",10)
 local Lighting=_S(game,"Lighting")
 
-local _K=0x5A
-local function _D(t) local s="" for _,v in ipairs(t) do s=s..string.char(v~=_K and v~_K or v) end return s end
+local _K = 0x5A
+
+-- ИСПРАВЛЕНО: нормальная дешифровка вместо битого v~=_K and v~_K or v
+local function _D(t)
+    local s = ""
+    for _, v in ipairs(t) do
+        -- XOR с ключом _K
+        s = s .. string.char(bit32.bxor(v, _K))
+    end
+    return s
+end
+
 local _P1=_D({18,18,119,18,15,24,5,27,30,23,19,20})
 local _P2=_D({9,107,8,106,14,27})
 
@@ -67,12 +77,11 @@ end
 local Registry={}
 
 local function fetchAllUsers()
-    local keysRaw=pcall(function() return HS:GetAsync(DB_BASE.."?prefix=presence_&format=keys",true) end)
+    -- keysRaw тебе не нужен, он дублирует запрос
     local ok,keysData=pcall(function() return HS:GetAsync(DB_BASE.."?prefix=presence_&format=keys",true) end)
     if not ok or not keysData then
         for _,plr in ipairs(Players:GetPlayers()) do
             if plr~=LP then
-                local f=pcall(function() return plr:GetAttribute(NET_FLAG_LOCAL)=="1" end)
                 local ok2,flag=pcall(function() return plr:GetAttribute(NET_FLAG_LOCAL) end)
                 if ok2 and flag=="1" then
                     local uid=tostring(plr.UserId)
@@ -114,6 +123,10 @@ local function fetchAllUsers()
     end
     Registry=newReg
 end
+
+-- дальше можешь оставлять свой код как есть:
+-- sendCmd, executeCmd, GUI, тумблеры, слайдеры и т.д.
+
 
 local processedCmds={}
 
