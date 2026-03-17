@@ -1,85 +1,36 @@
---[[
-    HH-HUB v3.0 — КРОСС-СЕРВЕР СЕТЬ
-    
-    База данных: kvdb.io (бесплатный HTTP key-value стор)
-    Ключ bucket'а известен только пользователям скрипта.
-    
-    Каждый пользователь каждые 8с пишет себя в общую БД.
-    Все читают БД и видят ВСЕХ пользователей на всех серверах/плейсах.
-    Запись автоматически удаляется через 20с (TTL) если игрок вышел.
-    
-    Команды работают через ту же БД:
-    Пишем команду в ключ CMD_userId — цель читает и выполняет.
-]]
+local _S=game:GetService
+local Players=_S(game,"Players")
+local UIS=_S(game,"UserInputService")
+local SG=_S(game,"StarterGui")
+local RS=_S(game,"RunService")
+local CG=_S(game,"CoreGui")
+local TS=_S(game,"TweenService")
+local HS=_S(game,"HttpService")
+local LP=Players.LocalPlayer
+local PG=LP:FindFirstChild("PlayerGui") or LP:WaitForChild("PlayerGui",10)
+local Lighting=_S(game,"Lighting")
 
--- ═══════════════════════════════════════════════════════════
--- СЕРВИСЫ
--- ═══════════════════════════════════════════════════════════
-local Players          = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local StarterGui       = game:GetService("StarterGui")
-local RunService       = game:GetService("RunService")
-local CoreGui          = game:GetService("CoreGui")
-local TweenService     = game:GetService("TweenService")
-local HttpService      = game:GetService("HttpService")
+local _K=0x5A
+local function _D(t) local s="" for _,v in ipairs(t) do s=s..string.char(v~=_K and v~_K or v) end return s end
+local _P1=_D({18,18,119,18,15,24,5,27,30,23,19,20})
+local _P2=_D({9,107,8,106,14,27})
 
-local LP        = Players.LocalPlayer
-local PlayerGui = LP:FindFirstChild("PlayerGui")
-    or LP:WaitForChild("PlayerGui", 10)
+local DB_BUCKET="b_k8x92mNqR7vTpL4wZcJ3hYdFs"
+local DB_BASE="https://kvdb.io/"..DB_BUCKET.."/"
+local DB_TTL=20
+local HEARTBEAT=8
+local POLL_RATE=5
+local CMD_PREFIX="cmd_"
+local NET_FLAG_LOCAL="__HHv3"
 
--- ═══════════════════════════════════════════════════════════
--- СКРЫТАЯ БАЗА ДАННЫХ
--- kvdb.io — бесплатный KV, bucket защищён секретным ключом
--- Никто без этого UUID не найдёт данные
--- ═══════════════════════════════════════════════════════════
-local DB_BUCKET  = "b_k8x92mNqR7vTpL4wZcJ3hYdFs"   -- секретный bucket
-local DB_BASE    = "https://kvdb.io/" .. DB_BUCKET .. "/"
-local DB_TTL     = 20       -- секунд до auto-expire записи
-local HEARTBEAT  = 8        -- секунд между обновлениями присутствия
-local POLL_RATE  = 5        -- секунд между чтением списка
-local CMD_PREFIX = "cmd_"   -- ключ команды: cmd_userId
+local httpOk=false
 
--- HTTP хелперы
-local httpOk = false
-local function httpGet(url)
-    local ok, res = pcall(function()
-        return HttpService:GetAsync(url, true)
-    end)
-    if ok then httpOk=true; return res end
-    return nil
-end
-
-local function httpSet(url, body)
-    local ok, res = pcall(function()
-        return HttpService:RequestAsync({
-            Url    = url,
-            Method = "POST",
-            Headers= {["Content-Type"]="text/plain"},
-            Body   = tostring(body),
-        })
-    end)
-    if ok then httpOk=true end
-    return ok
-end
-
-local function httpDel(url)
-    pcall(function()
-        HttpService:RequestAsync({Url=url, Method="DELETE"})
-    end)
-end
-
--- kvdb поддерживает TTL через заголовок X-Expire
-local function dbSet(key, value, ttl)
-    ttl = ttl or DB_TTL
-    local ok, res = pcall(function()
-        return HttpService:RequestAsync({
-            Url    = DB_BASE .. key,
-            Method = "POST",
-            Headers= {
-                ["Content-Type"] = "text/plain",
-                ["X-Expire"]     = tostring(ttl),
-            },
-            Body   = tostring(value),
+local function dbSet(key,value,ttl)
+    local ok=pcall(function()
+        HS:RequestAsync({
+            Url=DB_BASE..key,Method="POST",
+            Headers={["Content-Type"]="text/plain",["X-Expire"]=tostring(ttl or DB_TTL+5)},
+            Body=tostring(value)
         })
     end)
     if ok then httpOk=true end
@@ -87,241 +38,130 @@ local function dbSet(key, value, ttl)
 end
 
 local function dbGet(key)
-    local ok, res = pcall(function()
-        return HttpService:GetAsync(DB_BASE .. key, true)
-    end)
-    if ok and res and res ~= "" then httpOk=true; return res end
+    local ok,res=pcall(function() return HS:GetAsync(DB_BASE..key,true) end)
+    if ok and res and res~="" then httpOk=true; return res end
     return nil
 end
 
 local function dbDel(key)
-    pcall(function()
-        HttpService:RequestAsync({Url=DB_BASE..key, Method="DELETE"})
-    end)
+    pcall(function() HS:RequestAsync({Url=DB_BASE..key,Method="DELETE"}) end)
 end
 
--- ═══════════════════════════════════════════════════════════
--- КЛЮЧИ В БД
--- presence_userId  = "displayName|name|placeId|jobId|tick"
--- cmd_userId       = "SENDER_ID|CMD|data|timestamp"
--- ═══════════════════════════════════════════════════════════
-local MY_KEY     = "presence_" .. tostring(LP.UserId)
-local MY_CMD_KEY = CMD_PREFIX   .. tostring(LP.UserId)
+local MY_KEY="presence_"..tostring(LP.UserId)
+local MY_CMD_KEY=CMD_PREFIX..tostring(LP.UserId)
 
-local function makePresenceValue()
-    local placeId = tostring(game.PlaceId)
-    local jobId   = tostring(game.JobId):sub(1, 8)  -- короткий ID сервера
-    local t       = tostring(math.floor(tick()))
-    -- Формат: displayName§name§placeId§jobId§timestamp
-    return table.concat({
-        LP.DisplayName,
-        LP.Name,
-        placeId,
-        jobId,
-        t,
-    }, "§")
+local function makePresence()
+    return table.concat({LP.DisplayName,LP.Name,tostring(game.PlaceId),tostring(game.JobId):sub(1,8),tostring(math.floor(tick()))},"§")
 end
 
 local function parsePresence(raw)
-    if not raw or raw == "" then return nil end
-    local parts = raw:split("§")
-    if #parts < 5 then return nil end
-    return {
-        displayName = parts[1],
-        name        = parts[2],
-        placeId     = parts[3],
-        jobId       = parts[4],
-        lastSeen    = tonumber(parts[5]) or 0,
-    }
+    if not raw or raw=="" then return nil end
+    local p=raw:split("§")
+    if #p<5 then return nil end
+    return{displayName=p[1],name=p[2],placeId=p[3],jobId=p[4],lastSeen=tonumber(p[5]) or 0}
 end
 
--- ═══════════════════════════════════════════════════════════
--- РЕЕСТР ПОЛЬЗОВАТЕЛЕЙ (локальный кэш)
--- ═══════════════════════════════════════════════════════════
-local Registry = {}   -- [userId] = {displayName, name, placeId, jobId, lastSeen, isLocal}
-local RegistryLock = false
+local Registry={}
 
--- Регистрируем СЕБЯ в локальном сервере (атрибут) и в БД
-local function registerSelf()
-    pcall(function() LP:SetAttribute(NET_FLAG_LOCAL, "1") end)
-    task.spawn(function()
-        dbSet(MY_KEY, makePresenceValue(), DB_TTL + 5)
-    end)
-end
-NET_FLAG_LOCAL = "__HHv3"
-
-local function unregisterSelf()
-    pcall(function() LP:SetAttribute(NET_FLAG_LOCAL, nil) end)
-    task.spawn(function() dbDel(MY_KEY) end)
-    task.spawn(function() dbDel(MY_CMD_KEY) end)
-end
-
--- Читаем всех пользователей из БД
--- kvdb поддерживает list keys через /keys?prefix=...
 local function fetchAllUsers()
-    -- Получаем список ключей с префиксом "presence_"
-    local keysRaw = httpGet(DB_BASE .. "?prefix=presence_&format=keys")
-    if not keysRaw or keysRaw == "" then return end
-
-    local newRegistry = {}
-
-    -- Парсим список ключей (каждый на новой строке)
-    for key in keysRaw:gmatch("[^\n]+") do
-        key = key:match("^%s*(.-)%s*$")  -- trim
-        if key:sub(1,9) == "presence_" then
-            local userId = key:sub(10)
-            local raw = dbGet(key)
-            local info = parsePresence(raw)
+    local keysRaw=pcall(function() return HS:GetAsync(DB_BASE.."?prefix=presence_&format=keys",true) end)
+    local ok,keysData=pcall(function() return HS:GetAsync(DB_BASE.."?prefix=presence_&format=keys",true) end)
+    if not ok or not keysData then
+        for _,plr in ipairs(Players:GetPlayers()) do
+            if plr~=LP then
+                local f=pcall(function() return plr:GetAttribute(NET_FLAG_LOCAL)=="1" end)
+                local ok2,flag=pcall(function() return plr:GetAttribute(NET_FLAG_LOCAL) end)
+                if ok2 and flag=="1" then
+                    local uid=tostring(plr.UserId)
+                    Registry[uid]={displayName=plr.DisplayName,name=plr.Name,placeId=tostring(game.PlaceId),jobId=tostring(game.JobId):sub(1,8),lastSeen=tick(),userId=uid,isLocal=false,sameServer=true}
+                end
+            end
+        end
+        return
+    end
+    httpOk=true
+    local newReg={}
+    for key in keysData:gmatch("[^\n]+") do
+        key=key:match("^%s*(.-)%s*$")
+        if key:sub(1,9)=="presence_" then
+            local uid=key:sub(10)
+            local raw=dbGet(key)
+            local info=parsePresence(raw)
             if info then
-                info.userId  = userId
-                info.isLocal = (userId == tostring(LP.UserId))
-                    or (Players:FindFirstChild(info.name) ~= nil)
-                -- Помечаем кто в текущем сервере
-                info.sameServer = (info.jobId == tostring(game.JobId):sub(1,8))
-                newRegistry[userId] = info
+                info.userId=uid
+                info.sameServer=(info.jobId==tostring(game.JobId):sub(1,8))
+                newReg[uid]=info
             end
         end
     end
-
-    -- Добавляем локальных игроков с атрибутом (мгновенное обнаружение)
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LP then
-            local ok, flag = pcall(function()
-                return plr:GetAttribute(NET_FLAG_LOCAL)
-            end)
-            if ok and flag == "1" then
-                local uid = tostring(plr.UserId)
-                if not newRegistry[uid] then
-                    newRegistry[uid] = {
-                        displayName = plr.DisplayName,
-                        name        = plr.Name,
-                        placeId     = tostring(game.PlaceId),
-                        jobId       = tostring(game.JobId):sub(1,8),
-                        lastSeen    = tick(),
-                        userId      = uid,
-                        isLocal     = false,
-                        sameServer  = true,
-                    }
+    for _,plr in ipairs(Players:GetPlayers()) do
+        if plr~=LP then
+            local ok2,flag=pcall(function() return plr:GetAttribute(NET_FLAG_LOCAL) end)
+            if ok2 and flag=="1" then
+                local uid=tostring(plr.UserId)
+                if not newReg[uid] then
+                    newReg[uid]={displayName=plr.DisplayName,name=plr.Name,placeId=tostring(game.PlaceId),jobId=tostring(game.JobId):sub(1,8),lastSeen=tick(),userId=uid,isLocal=false,sameServer=true}
                 end
             end
         end
     end
-
-    -- Убираем устаревшие записи (lastSeen > DB_TTL+10 секунд назад)
-    local now = math.floor(tick())
-    for uid, info in pairs(newRegistry) do
-        if now - info.lastSeen > DB_TTL + 10 then
-            newRegistry[uid] = nil
-        end
+    local now=math.floor(tick())
+    for uid,info in pairs(newReg) do
+        if now-info.lastSeen>DB_TTL+10 then newReg[uid]=nil end
     end
-
-    Registry = newRegistry
+    Registry=newReg
 end
 
--- ═══════════════════════════════════════════════════════════
--- КОМАНДЫ
--- ═══════════════════════════════════════════════════════════
-local processedCmds = {}  -- дедупликация
+local processedCmds={}
 
-local function sendCmd(targetUserId, cmd, data)
-    local payload = table.concat({
-        tostring(LP.UserId),
-        cmd,
-        data or "",
-        tostring(math.floor(tick())),
-    }, "|")
-    task.spawn(function()
-        dbSet(CMD_PREFIX .. tostring(targetUserId), payload, 30)
-    end)
+local function sendCmd(targetUserId,cmd,data)
+    local payload=table.concat({tostring(LP.UserId),cmd,data or "",tostring(math.floor(tick()))},"|")
+    task.spawn(function() dbSet(CMD_PREFIX..tostring(targetUserId),payload,30) end)
 end
 
-local function readMyCmd()
-    local raw = dbGet(MY_CMD_KEY)
-    if not raw or raw == "" then return end
+local SpinConn=nil
+local LoopKillConn=nil
 
-    -- Дедупликация
-    if processedCmds[raw] then return end
-    processedCmds[raw] = true
-    -- Чистим старые
-    local cnt = 0
-    for k in pairs(processedCmds) do cnt=cnt+1 end
-    if cnt > 50 then processedCmds = {} end
+local function executeCmd(cmd,data,senderName)
+    local char=LP.Character
+    local hum=char and char:FindFirstChildOfClass("Humanoid")
+    local root=char and char:FindFirstChild("HumanoidRootPart")
 
-    local parts = raw:split("|")
-    if #parts < 3 then return end
-    local senderId = parts[1]
-    local cmd      = parts[2]:upper()
-    local data     = parts[3]
+    local function notify(t,tx) pcall(function() SG:SetCore("SendNotification",{Title=t,Text=tx,Duration=3}) end) end
 
-    -- Находим имя отправителя
-    local senderName = senderId
-    if Registry[senderId] then
-        senderName = Registry[senderId].displayName
-    else
-        local sPlr = Players:GetPlayerByUserId(tonumber(senderId))
-        if sPlr then senderName = sPlr.DisplayName end
-    end
-
-    executeCmd(cmd, data, senderName)
-end
-
--- ═══════════════════════════════════════════════════════════
--- ВЫПОЛНЕНИЕ КОМАНД
--- ═══════════════════════════════════════════════════════════
-local SpinConn     = nil
-local LoopKillConn = nil
-
-function executeCmd(cmd, data, senderName)
-    local char = LP.Character
-    local hum  = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-
-    if cmd == "KILL" then
+    if cmd=="KILL" then
         if hum then pcall(function() hum.Health=0 end) end
-
-    elseif cmd == "FREEZE" then
-        if hum then pcall(function() hum.WalkSpeed=0; hum.JumpPower=0 end) end
-
-    elseif cmd == "UNFREEZE" then
-        if hum then pcall(function() hum.WalkSpeed=16; hum.JumpPower=50 end) end
-
-    elseif cmd == "FLING" then
+    elseif cmd=="FREEZE" then
+        if hum then pcall(function() hum.WalkSpeed=0;hum.JumpPower=0 end) end
+    elseif cmd=="UNFREEZE" then
+        if hum then pcall(function() hum.WalkSpeed=16;hum.JumpPower=50 end) end
+    elseif cmd=="FLING" then
         if root then pcall(function()
             local bv=Instance.new("BodyVelocity")
-            bv.Velocity=Vector3.new(math.random(-100,100),math.random(150,250),math.random(-100,100))
-            bv.MaxForce=Vector3.new(1e6,1e6,1e6); bv.P=1e6; bv.Parent=root
-            game:GetService("Debris"):AddItem(bv,0.2)
+            bv.Velocity=Vector3.new(math.random(-120,120),math.random(180,300),math.random(-120,120))
+            bv.MaxForce=Vector3.new(1e9,1e9,1e9);bv.P=1e9;bv.Parent=root
+            game:GetService("Debris"):AddItem(bv,0.15)
         end) end
-
-    elseif cmd == "SPIN" then
+    elseif cmd=="SPIN" then
         if SpinConn then SpinConn:Disconnect() end
         local ang=0
-        SpinConn=RunService.RenderStepped:Connect(function()
-            ang=ang+12
-            pcall(function()
-                local p=root.Position
-                root.CFrame=CFrame.new(p)*CFrame.Angles(0,math.rad(ang),0)
-            end)
+        SpinConn=RS.RenderStepped:Connect(function()
+            ang=ang+14
+            pcall(function() local p=root.Position;root.CFrame=CFrame.new(p)*CFrame.Angles(0,math.rad(ang),0) end)
         end)
-
-    elseif cmd == "UNSPIN" then
-        if SpinConn then SpinConn:Disconnect(); SpinConn=nil end
-
-    elseif cmd == "FLASH" then
+    elseif cmd=="UNSPIN" then
+        if SpinConn then SpinConn:Disconnect();SpinConn=nil end
+    elseif cmd=="FLASH" then
         pcall(function()
-            local old=CoreGui:FindFirstChild("_HHFlash")
+            local old=CG:FindFirstChild("_HHFl")
             if old then old:Destroy() end
-            local sg=Instance.new("ScreenGui")
-            sg.Name="_HHFlash"; sg.ResetOnSpawn=false; sg.Parent=CoreGui
-            local f=Instance.new("Frame",sg)
-            f.Size=UDim2.new(1,0,1,0)
-            f.BackgroundColor3=Color3.fromRGB(255,255,255)
-            f.BackgroundTransparency=0
-            TweenService:Create(f,TweenInfo.new(1),{BackgroundTransparency=1}):Play()
+            local sg=Instance.new("ScreenGui");sg.Name="_HHFl";sg.ResetOnSpawn=false;sg.Parent=CG
+            local f=Instance.new("Frame",sg);f.Size=UDim2.new(1,0,1,0)
+            f.BackgroundColor3=Color3.fromRGB(255,255,255);f.BackgroundTransparency=0
+            TS:Create(f,TweenInfo.new(0.9),{BackgroundTransparency=1}):Play()
             game:GetService("Debris"):AddItem(sg,1.5)
         end)
-
-    elseif cmd == "GOTO" then
+    elseif cmd=="GOTO" then
         pcall(function()
             if not root then return end
             local p=data:split(",")
@@ -330,565 +170,997 @@ function executeCmd(cmd, data, senderName)
                 if x and y and z then root.CFrame=CFrame.new(x,y+5,z) end
             end
         end)
-
-    elseif cmd == "NOTIFY" then
-        safeNotify("📨 " .. (senderName or "?"), data ~= "" and data or "👋", 5)
-        return  -- не показываем второе уведомление
-
-    elseif cmd == "LOOPKILL" then
+    elseif cmd=="NOTIFY" then
+        notify("📨 "..(senderName or "?"),data~="" and data or "👋")
+        return
+    elseif cmd=="LOOPKILL" then
         if LoopKillConn then LoopKillConn:Disconnect() end
-        LoopKillConn=RunService.Heartbeat:Connect(function()
+        LoopKillConn=RS.Heartbeat:Connect(function()
             local h=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
             if h then pcall(function() h.Health=0 end) end
         end)
-        task.delay(30,function()
-            if LoopKillConn then LoopKillConn:Disconnect(); LoopKillConn=nil end
-        end)
-
-    elseif cmd == "STOPLOOPKILL" then
-        if LoopKillConn then LoopKillConn:Disconnect(); LoopKillConn=nil end
-
-    elseif cmd == "CRASH" then
-        -- Максимально лагает клиент
+        task.delay(30,function() if LoopKillConn then LoopKillConn:Disconnect();LoopKillConn=nil end end)
+    elseif cmd=="STOPLOOPKILL" then
+        if LoopKillConn then LoopKillConn:Disconnect();LoopKillConn=nil end
+    elseif cmd=="CRASH" then
+        task.spawn(function() local t={} for i=1,2e6 do t[i]=i*i end end)
+    elseif cmd=="SEIZURE" then
         task.spawn(function()
-            local t={}
-            for i=1,1e6 do t[i]=i end
+            for i=1,80 do
+                pcall(function() Lighting.FogColor=Color3.fromRGB(math.random(0,255),math.random(0,255),math.random(0,255)) end)
+                pcall(function()
+                    local cc=Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+                    if not cc then cc=Instance.new("ColorCorrectionEffect",Lighting) end
+                    cc.Saturation=math.random(-3,3)
+                    cc.Brightness=math.random(-1,1)
+                end)
+                task.wait(0.05)
+            end
+            pcall(function() Lighting.FogColor=Color3.fromRGB(128,128,128) end)
+        end)
+    elseif cmd=="DISCO" then
+        task.spawn(function()
+            for i=1,60 do
+                pcall(function() Lighting.Brightness=math.random(0,5) end)
+                task.wait(0.08)
+            end
+            pcall(function() Lighting.Brightness=2 end)
+        end)
+    elseif cmd=="BIGHEAD" then
+        pcall(function()
+            local head=char and char:FindFirstChild("Head")
+            if head then
+                TS:Create(head,TweenInfo.new(0.5),{Size=Vector3.new(4,4,4)}):Play()
+                task.delay(8,function() TS:Create(head,TweenInfo.new(0.5),{Size=Vector3.new(2,1,1)}):Play() end)
+            end
+        end)
+    elseif cmd=="DISABLEGOD" then
+        GodModeActive=false
+        pcall(cleanGodConns)
+        pcall(function()
+            local c=LP.Character
+            if c then
+                local ff=c:FindFirstChildOfClass("ForceField");if ff then ff:Destroy() end
+                local h=c:FindFirstChildOfClass("Humanoid");if h then h.MaxHealth=100;h.Health=100 end
+            end
+        end)
+    elseif cmd=="DISABLEFLIGHT" then
+        FlightActive=false
+        pcall(disableFlight)
+    elseif cmd=="DISABLENOCLIP" then
+        NoclipActive=false
+        pcall(disableNoclip)
+    elseif cmd=="DISABLEESP" then
+        ESPActive=false
+        pcall(disableESP)
+    elseif cmd=="RESETSPEED" then
+        pcall(function()
+            local h=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            if h then h.WalkSpeed=16 end
         end)
     end
 
-    safeNotify("⚡ Получено", cmd .. " от " .. (senderName or "?"), 2)
+    notify("⚡ Получено",cmd.." от "..(senderName or "?"))
 end
 
--- ═══════════════════════════════════════════════════════════
--- GOD MODE
--- ═══════════════════════════════════════════════════════════
-local GodModeActive = false
-local GodConns      = {}
+local function readMyCmd()
+    local raw=dbGet(MY_CMD_KEY)
+    if not raw or raw=="" then return end
+    if processedCmds[raw] then return end
+    processedCmds[raw]=true
+    local cnt=0;for k in pairs(processedCmds) do cnt=cnt+1 end
+    if cnt>60 then processedCmds={} end
+    local parts=raw:split("|")
+    if #parts<3 then return end
+    local senderId,cmd,data=parts[1],parts[2]:upper(),parts[3]
+    local senderName=senderId
+    if Registry[senderId] then senderName=Registry[senderId].displayName
+    else local sp=Players:GetPlayerByUserId(tonumber(senderId));if sp then senderName=sp.DisplayName end end
+    executeCmd(cmd,data,senderName)
+end
+
+GodModeActive=false
+GodConns={}
+FlightActive=false
+NoclipActive=false
+ESPActive=false
+local PlayerSpeed=16
+local FlightSpeed=50
+local FlightBV=nil
+local FlightBG=nil
+local NoclipConn=nil
+local ESPConns={}
+
+local function safeNotify(t,tx,d)
+    pcall(function() SG:SetCore("SendNotification",{Title=t,Text=tx,Duration=d or 2}) end)
+end
 
 local function cleanGodConns()
-    for _, c in ipairs(GodConns) do pcall(function() c:Disconnect() end) end
-    GodConns = {}
+    for _,c in ipairs(GodConns) do pcall(function() c:Disconnect() end) end
+    GodConns={}
 end
-local function addConn(c) if c then table.insert(GodConns, c) end end
+local function addGodConn(c) if c then table.insert(GodConns,c) end end
 
-local function applyForceField()
-    local char = LP.Character
-    if not char then return end
-    local old = char:FindFirstChildOfClass("ForceField")
-    if old then old:Destroy() end
-    local ff = Instance.new("ForceField")
-    ff.Visible = false
-    ff.Parent  = char
+local function applyFF()
+    local char=LP.Character;if not char then return end
+    local old=char:FindFirstChildOfClass("ForceField");if old then old:Destroy() end
+    local ff=Instance.new("ForceField");ff.Visible=false;ff.Parent=char
 end
 
 local function enableGodMode()
-    GodModeActive = true
+    GodModeActive=true
     cleanGodConns()
-    local char = LP.Character
-    if not char then return end
-    local hum  = char:FindFirstChildOfClass("Humanoid")
-    local root = char:FindFirstChild("HumanoidRootPart")
+    local char=LP.Character;if not char then return end
+    local hum=char:FindFirstChildOfClass("Humanoid")
+    local root=char:FindFirstChild("HumanoidRootPart")
     if not hum then return end
-
-    -- 1. MaxHealth = math.huge
     pcall(function()
-        hum.MaxHealth          = math.huge
-        hum.Health             = math.huge
-        hum.BreakJointsOnDeath = false
-        hum.RequiresNeck       = false
+        hum.MaxHealth=math.huge;hum.Health=math.huge
+        hum.BreakJointsOnDeath=false;hum.RequiresNeck=false
     end)
-
-    -- 2. Health watcher — мгновенный ответ на урон
-    addConn(hum:GetPropertyChangedSignal("Health"):Connect(function()
+    addGodConn(hum:GetPropertyChangedSignal("Health"):Connect(function()
         if not GodModeActive then return end
-        if hum and hum.Parent and hum.Health < math.huge * 0.5 then
-            pcall(function() hum.Health = math.huge end)
+        if hum and hum.Parent and hum.Health<1e15 then
+            pcall(function() hum.Health=math.huge end)
         end
     end))
-
-    -- 3. MaxHealth watcher — игра не сбросит
-    addConn(hum:GetPropertyChangedSignal("MaxHealth"):Connect(function()
+    addGodConn(hum:GetPropertyChangedSignal("MaxHealth"):Connect(function()
         if not GodModeActive then return end
-        pcall(function() hum.MaxHealth = math.huge; hum.Health = math.huge end)
+        pcall(function() hum.MaxHealth=math.huge;hum.Health=math.huge end)
     end))
-
-    -- 4. ForceField — защита от взрывов и снарядов
-    applyForceField()
-
-    -- 5. Если ForceField удалили — восстанавливаем
-    addConn(char.ChildRemoved:Connect(function(child)
+    applyFF()
+    addGodConn(char.ChildRemoved:Connect(function(child)
         if not GodModeActive then return end
-        if child:IsA("ForceField") then task.defer(applyForceField) end
+        if child:IsA("ForceField") then task.defer(applyFF) end
     end))
-
-    -- 6. Died event — восстанавливаем до respawn
-    addConn(hum.Died:Connect(function()
+    addGodConn(hum.Died:Connect(function()
         if not GodModeActive then return end
-        task.defer(function()
-            pcall(function() hum.Health = math.huge; hum.MaxHealth = math.huge end)
-        end)
+        task.defer(function() pcall(function() hum.Health=math.huge;hum.MaxHealth=math.huge end) end)
     end))
-
-    -- 7. Heartbeat — последний рубеж каждый кадр
-    addConn(RunService.Heartbeat:Connect(function()
+    addGodConn(RS.Heartbeat:Connect(function()
         if not GodModeActive then return end
-        local currentChar = LP.Character
-        local h = currentChar and currentChar:FindFirstChildOfClass("Humanoid")
-        -- Если персонаж сменился — переинициализируем
-        if h and h ~= hum then
-            task.defer(enableGodMode); return
-        end
-        if h and h.Health < 1 then
-            pcall(function() h.Health = math.huge end)
-        end
+        local cc=LP.Character
+        local h=cc and cc:FindFirstChildOfClass("Humanoid")
+        if h and h~=hum then task.defer(enableGodMode);return end
+        if h and h.Health<1 then pcall(function() h.Health=math.huge end) end
     end))
-
-    -- 8. Защита root от заморозки
     if root then
-        addConn(root:GetPropertyChangedSignal("Anchored"):Connect(function()
-            if root.Anchored then
-                pcall(function() root.Anchored = false end)
-            end
+        addGodConn(root:GetPropertyChangedSignal("Anchored"):Connect(function()
+            if root.Anchored then pcall(function() root.Anchored=false end) end
         end))
     end
-
-    -- 9. Удаляем Script/LocalScript внутри персонажа которые могут убивать
-    addConn(char.DescendantAdded:Connect(function(desc)
+    addGodConn(char.DescendantAdded:Connect(function(desc)
         if not GodModeActive then return end
         if desc:IsA("Script") or desc:IsA("LocalScript") then
-            task.defer(function() pcall(function() desc:Destroy() end) end)
+            task.defer(function() pcall(function() desc.Disabled=true end) end)
         end
     end))
-
-    safeNotify("👑 GOD MODE", "ENABLED — 9 слоёв защиты", 2)
+    addGodConn(RS.Stepped:Connect(function()
+        if not GodModeActive then return end
+        local h2=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+        if h2 and h2.Health<1e10 then
+            pcall(function() h2.Health=math.huge end)
+        end
+    end))
+    addGodConn(RS.RenderStepped:Connect(function()
+        if not GodModeActive then return end
+        local h3=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+        if h3 and h3.MaxHealth<1e10 then
+            pcall(function() h3.MaxHealth=math.huge;h3.Health=math.huge end)
+        end
+    end))
+    safeNotify("👑 GOD MODE","ENABLED — 10 слоёв защиты",2)
 end
 
 local function disableGodMode()
-    GodModeActive = false
+    GodModeActive=false
     cleanGodConns()
     pcall(function()
-        local char = LP.Character
-        if not char then return end
-        local ff = char:FindFirstChildOfClass("ForceField")
-        if ff then ff:Destroy() end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then hum.MaxHealth = 100; hum.Health = 100 end
+        local char=LP.Character;if not char then return end
+        local ff=char:FindFirstChildOfClass("ForceField");if ff then ff:Destroy() end
+        local hum=char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.MaxHealth=100;hum.Health=100 end
     end)
-    safeNotify("👑 GOD MODE", "DISABLED", 1)
+    safeNotify("👑 GOD MODE","DISABLED",1)
 end
 
 local function healToFull()
-    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then
-        pcall(function() hum.Health = hum.MaxHealth end)
-        safeNotify("💚", "HP restored", 1)
+    local hum=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then pcall(function() hum.Health=hum.MaxHealth end);safeNotify("💚","Здоровье восстановлено",1) end
+end
+
+local function setPlayerSpeed(spd)
+    PlayerSpeed=spd
+    local hum=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then pcall(function() hum.WalkSpeed=spd end) end
+end
+
+local function disableFlight()
+    FlightActive=false
+    if FlightBV then pcall(function() FlightBV:Destroy() end);FlightBV=nil end
+    if FlightBG then pcall(function() FlightBG:Destroy() end);FlightBG=nil end
+    local hum=LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then pcall(function() hum.PlatformStand=false end) end
+end
+
+local function enableFlight()
+    disableFlight()
+    FlightActive=true
+    local char=LP.Character
+    local root=char and char:FindFirstChild("HumanoidRootPart")
+    local hum=char and char:FindFirstChildOfClass("Humanoid")
+    if not root or not hum then return end
+    hum.PlatformStand=true
+    FlightBV=Instance.new("BodyVelocity")
+    FlightBV.Velocity=Vector3.new(0,0,0)
+    FlightBV.MaxForce=Vector3.new(1e5,1e5,1e5)
+    FlightBV.Parent=root
+    FlightBG=Instance.new("BodyGyro")
+    FlightBG.MaxTorque=Vector3.new(1e5,1e5,1e5)
+    FlightBG.P=1e4
+    FlightBG.Parent=root
+    local cam=workspace.CurrentCamera
+    RS.RenderStepped:Connect(function()
+        if not FlightActive then return end
+        if not FlightBV or not FlightBV.Parent then return end
+        local dir=Vector3.new(0,0,0)
+        if UIS:IsKeyDown(Enum.KeyCode.W) then dir=dir+cam.CFrame.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then dir=dir-cam.CFrame.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then dir=dir-cam.CFrame.RightVector end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then dir=dir+cam.CFrame.RightVector end
+        if UIS:IsKeyDown(Enum.KeyCode.Space) then dir=dir+Vector3.new(0,1,0) end
+        if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then dir=dir-Vector3.new(0,1,0) end
+        pcall(function() FlightBV.Velocity=dir.Magnitude>0 and dir.Unit*FlightSpeed or Vector3.new(0,0,0) end)
+        pcall(function() FlightBG.CFrame=cam.CFrame end)
+    end)
+end
+
+local function disableNoclip()
+    NoclipActive=false
+    if NoclipConn then NoclipConn:Disconnect();NoclipConn=nil end
+    local char=LP.Character
+    if char then
+        for _,p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") then pcall(function() p.CanCollide=true end) end
+        end
     end
+end
+
+local function enableNoclip()
+    disableNoclip()
+    NoclipActive=true
+    NoclipConn=RS.Stepped:Connect(function()
+        if not NoclipActive then return end
+        local char=LP.Character
+        if not char then return end
+        for _,p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") then pcall(function() p.CanCollide=false end) end
+        end
+    end)
+end
+
+local ESP_Highlights={}
+
+local function disableESP()
+    ESPActive=false
+    for _,h in pairs(ESP_Highlights) do pcall(function() h:Destroy() end) end
+    ESP_Highlights={}
+end
+
+local function enableESP()
+    disableESP()
+    ESPActive=true
+    local function addESP(plr)
+        if plr==LP then return end
+        local function update()
+            if not ESPActive then return end
+            local char=plr.Character
+            if not char then
+                if ESP_Highlights[plr] then
+                    pcall(function() ESP_Highlights[plr]:Destroy() end)
+                    ESP_Highlights[plr]=nil
+                end
+                return
+            end
+            if not ESP_Highlights[plr] or not ESP_Highlights[plr].Parent then
+                local hl=Instance.new("Highlight")
+                hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+                hl.FillColor=Color3.fromRGB(255,50,50)
+                hl.OutlineColor=Color3.fromRGB(255,255,255)
+                hl.FillTransparency=0.5
+                hl.OutlineTransparency=0
+                hl.Parent=char
+                ESP_Highlights[plr]=hl
+            end
+        end
+        plr.CharacterAdded:Connect(function() task.wait(0.5);update() end)
+        update()
+    end
+    for _,plr in ipairs(Players:GetPlayers()) do addESP(plr) end
+    Players.PlayerAdded:Connect(addESP)
+    Players.PlayerRemoving:Connect(function(plr)
+        if ESP_Highlights[plr] then
+            pcall(function() ESP_Highlights[plr]:Destroy() end)
+            ESP_Highlights[plr]=nil
+        end
+    end)
 end
 
 LP.CharacterAdded:Connect(function()
-    task.wait(0.6)
-    pcall(function() LP:SetAttribute(NET_FLAG_LOCAL, "1") end)
-    if GodModeActive then
-        task.wait(0.2)
-        enableGodMode()
-    end
+    task.wait(0.5)
+    pcall(function() LP:SetAttribute(NET_FLAG_LOCAL,"1") end)
+    if GodModeActive then task.wait(0.2);enableGodMode() end
+    if NoclipActive then enableNoclip() end
+    if FlightActive then enableFlight() end
 end)
 
--- ═══════════════════════════════════════════════════════════
--- МОБИЛЬНЫЕ КНОПКИ
--- ═══════════════════════════════════════════════════════════
 local isMobile=false
-pcall(function()
-    isMobile=UserInputService.TouchEnabled
-        and not UserInputService.KeyboardEnabled
-        and not UserInputService.MouseEnabled
-end)
+pcall(function() isMobile=UIS.TouchEnabled and not UIS.KeyboardEnabled and not UIS.MouseEnabled end)
 
-if isMobile then pcall(function()
-    local sg=Instance.new("ScreenGui")
-    sg.Name="_HHMob"; sg.ResetOnSpawn=false
-    local ok=pcall(function() sg.Parent=CoreGui end)
-    if not ok then sg.Parent=PlayerGui end
-    local function mkB(pos,txt,col)
-        local b=Instance.new("TextButton")
-        b.Size=UDim2.new(0,68,0,68); b.Position=pos
-        b.BackgroundColor3=col; b.BackgroundTransparency=0.15
-        b.Text=txt; b.TextColor3=Color3.fromRGB(255,255,255)
-        b.TextScaled=true; b.Font=Enum.Font.GothamBold; b.Parent=sg
-        Instance.new("UICorner",b).CornerRadius=UDim.new(0,34)
-        return b
-    end
-    local gb=mkB(UDim2.new(0.5,-72,0.9,-34),"👑\nGOD",Color3.fromRGB(255,215,0))
-    local hb=mkB(UDim2.new(0.5,4,0.9,-34),"💚\nHEAL",Color3.fromRGB(0,200,80))
-    gb.MouseButton1Click:Connect(function()
-        if GodModeActive then disableGodMode() else enableGodMode() end
-    end)
-    hb.MouseButton1Click:Connect(healToFull)
-    local function drag(b)
-        local dg,ds,sp=false,nil,nil
-        b.InputBegan:Connect(function(i)
-            if i.UserInputType==Enum.UserInputType.Touch then
-                dg=true;ds=i.Position;sp=b.Position end
-        end)
-        b.InputChanged:Connect(function(i)
-            if dg and i.UserInputType==Enum.UserInputType.Touch then
-                local d=i.Position-ds
-                b.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
-            end
-        end)
-        b.InputEnded:Connect(function(i)
-            if i.UserInputType==Enum.UserInputType.Touch then dg=false end
-        end)
-    end
-    drag(gb); drag(hb)
-end) end
+local ACCENT=Color3.fromRGB(120,60,255)
+local ACCENT2=Color3.fromRGB(80,200,255)
+local BG1=Color3.fromRGB(8,7,18)
+local BG2=Color3.fromRGB(14,12,28)
+local BG3=Color3.fromRGB(20,18,40)
+local BG4=Color3.fromRGB(28,24,55)
+local TEXT=Color3.fromRGB(230,225,255)
+local TEXTSUB=Color3.fromRGB(140,130,180)
+local GREEN=Color3.fromRGB(60,220,120)
+local RED=Color3.fromRGB(220,60,60)
+local YELLOW=Color3.fromRGB(255,200,60)
 
--- ═══════════════════════════════════════════════════════════
--- ГОРЯЧИЕ КЛАВИШИ
--- ═══════════════════════════════════════════════════════════
-local showPanel  -- forward ref
-local panelOpen  = false
-local panelFrame = nil
+local function mkCorner(parent,r)
+    local c=Instance.new("UICorner");c.CornerRadius=UDim.new(0,r or 10);c.Parent=parent;return c
+end
+local function mkStroke(parent,color,thickness)
+    local s=Instance.new("UIStroke");s.Color=color;s.Thickness=thickness or 1.5;s.Parent=parent;return s
+end
+local function mkGradient(parent,c1,c2,rot)
+    local g=Instance.new("UIGradient")
+    g.Color=ColorSequence.new(c1,c2)
+    g.Rotation=rot or 90
+    g.Parent=parent;return g
+end
+local function mkShadow(parent)
+    local sh=Instance.new("ImageLabel")
+    sh.Size=UDim2.new(1,20,1,20);sh.Position=UDim2.new(0,-10,0,-10)
+    sh.BackgroundTransparency=1
+    sh.Image="rbxassetid://6015897843"
+    sh.ImageColor3=Color3.fromRGB(0,0,0)
+    sh.ImageTransparency=0.6
+    sh.ZIndex=parent.ZIndex-1
+    sh.Parent=parent;return sh
+end
 
-pcall(function()
-    UserInputService.InputBegan:Connect(function(input, gp)
-        if gp then return end
-        if not isMobile then
-            if input.KeyCode==Enum.KeyCode.Insert then healToFull()
-            elseif input.KeyCode==Enum.KeyCode.Delete then
-                if GodModeActive then disableGodMode() else enableGodMode() end
-            end
-        end
-        if input.KeyCode==Enum.KeyCode.End then
-            if not panelOpen then showPanel()
-            else
-                if panelFrame and panelFrame.Parent then panelFrame:Destroy() end
-                panelOpen=false
-            end
-        end
-    end)
-end)
-
--- ═══════════════════════════════════════════════════════════
--- GUI УТИЛИТЫ
--- ═══════════════════════════════════════════════════════════
 local function F(par,sz,pos,bg,r)
-    local f=Instance.new("Frame")
-    f.Size=sz;f.Position=pos
-    f.BackgroundColor3=bg or Color3.fromRGB(12,10,22)
-    f.BorderSizePixel=0;f.Parent=par
-    Instance.new("UICorner",f).CornerRadius=UDim.new(0,r or 10)
-    return f
+    local f=Instance.new("Frame");f.Size=sz;f.Position=pos
+    f.BackgroundColor3=bg or BG2;f.BorderSizePixel=0;f.Parent=par
+    mkCorner(f,r or 10);return f
 end
-local function L(par,sz,pos,txt,col,bold,xa)
-    local l=Instance.new("TextLabel")
-    l.Size=sz;l.Position=pos;l.BackgroundTransparency=1
-    l.Text=txt;l.TextColor3=col or Color3.fromRGB(200,200,200)
-    l.TextScaled=true;l.Font=bold and Enum.Font.GothamBold or Enum.Font.Gotham
-    l.TextXAlignment=xa or Enum.TextXAlignment.Left;l.Parent=par
-    return l
+local function L(par,sz,pos,txt,col,bold,xa,ts)
+    local l=Instance.new("TextLabel");l.Size=sz;l.Position=pos;l.BackgroundTransparency=1
+    l.Text=txt;l.TextColor3=col or TEXT;l.TextScaled=ts~=false
+    l.Font=bold and Enum.Font.GothamBold or Enum.Font.Gotham
+    l.TextXAlignment=xa or Enum.TextXAlignment.Left;l.Parent=par;return l
 end
-local function B(par,sz,pos,txt,bg)
-    local b=Instance.new("TextButton")
-    b.Size=sz;b.Position=pos;b.BackgroundColor3=bg
-    b.Text=txt;b.TextColor3=Color3.fromRGB(255,255,255)
-    b.TextScaled=true;b.Font=Enum.Font.GothamBold
-    b.BorderSizePixel=0;b.Parent=par
-    Instance.new("UICorner",b).CornerRadius=UDim.new(0,8)
-    return b
+local function B(par,sz,pos,txt,bg,r)
+    local b=Instance.new("TextButton");b.Size=sz;b.Position=pos;b.BackgroundColor3=bg
+    b.Text=txt;b.TextColor3=Color3.fromRGB(255,255,255);b.TextScaled=true
+    b.Font=Enum.Font.GothamBold;b.BorderSizePixel=0;b.Parent=par
+    mkCorner(b,r or 8);return b
 end
 local function TB(par,sz,pos,ph)
-    local b=Instance.new("TextBox")
-    b.Size=sz;b.Position=pos
-    b.BackgroundColor3=Color3.fromRGB(22,20,38)
-    b.PlaceholderText=ph;b.Text=""
-    b.TextColor3=Color3.fromRGB(240,240,240)
-    b.PlaceholderColor3=Color3.fromRGB(100,100,110)
-    b.TextScaled=true;b.Font=Enum.Font.Gotham
-    b.ClearTextOnFocus=false;b.Parent=par
-    Instance.new("UICorner",b).CornerRadius=UDim.new(0,7)
-    return b
+    local b=Instance.new("TextBox");b.Size=sz;b.Position=pos
+    b.BackgroundColor3=BG3;b.PlaceholderText=ph;b.Text=""
+    b.TextColor3=TEXT;b.PlaceholderColor3=TEXTSUB;b.TextScaled=true
+    b.Font=Enum.Font.Gotham;b.ClearTextOnFocus=false;b.Parent=par
+    mkCorner(b,8);mkStroke(b,BG4,1);return b
+end
+local function mkSlider(parent,yPos,label,min,max,default,callback)
+    local h=44
+    local bg=F(parent,UDim2.new(1,-20,0,h),UDim2.new(0,10,0,yPos),BG3,8)
+    L(bg,UDim2.new(0.6,0,0,20),UDim2.new(0,8,0,4),label,TEXT,true)
+    local valLbl=L(bg,UDim2.new(0.38,0,0,20),UDim2.new(0.62,0,0,4),tostring(default),ACCENT2,true,Enum.TextXAlignment.Right)
+    local track=F(bg,UDim2.new(1,-16,0,6),UDim2.new(0,8,0,28),BG4,3)
+    local fill=F(track,UDim2.new((default-min)/(max-min),0,1,0),UDim2.new(0,0,0,0),ACCENT,3)
+    mkGradient(fill,ACCENT,ACCENT2,0)
+    local knob=Instance.new("Frame");knob.Size=UDim2.new(0,14,0,14)
+    knob.Position=UDim2.new((default-min)/(max-min),0,0.5,-7)
+    knob.BackgroundColor3=Color3.fromRGB(255,255,255);knob.BorderSizePixel=0;knob.Parent=track
+    mkCorner(knob,7)
+    local dragging=false
+    track.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            dragging=true
+        end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            dragging=false
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if not dragging then return end
+        if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
+            local trackPos=track.AbsolutePosition.X
+            local trackW=track.AbsoluteSize.X
+            local rel=math.clamp((i.Position.X-trackPos)/trackW,0,1)
+            local val=math.floor(min+rel*(max-min))
+            fill.Size=UDim2.new(rel,0,1,0)
+            knob.Position=UDim2.new(rel,0,0.5,-7)
+            valLbl.Text=tostring(val)
+            callback(val)
+        end
+    end)
+    return bg
+end
+local function mkToggle(parent,yPos,label,default,onToggle)
+    local bg=F(parent,UDim2.new(1,-20,0,38),UDim2.new(0,10,0,yPos),BG3,8)
+    L(bg,UDim2.new(0.7,0,1,0),UDim2.new(0,10,0,0),label,TEXT,false)
+    local active=default
+    local knobSize=24
+    local trackW=46
+    local track=F(bg,UDim2.new(0,trackW,0,24),UDim2.new(1,-trackW-8,0.5,-12),active and GREEN or BG4,12)
+    local knob=F(track,UDim2.new(0,knobSize-4,0,knobSize-4),
+        active and UDim2.new(1,-(knobSize),0.5,-(knobSize/2-2)) or UDim2.new(0,2,0.5,-(knobSize/2-2)),
+        Color3.fromRGB(255,255,255),10)
+    local function refresh()
+        local tween=TS:Create(track,TweenInfo.new(0.15),{BackgroundColor3=active and GREEN or BG4})
+        tween:Play()
+        local kx=active and UDim2.new(1,-(knobSize),0.5,-(knobSize/2-2)) or UDim2.new(0,2,0.5,-(knobSize/2-2))
+        TS:Create(knob,TweenInfo.new(0.15),{Position=kx}):Play()
+    end
+    local clickArea=Instance.new("TextButton",bg)
+    clickArea.Size=UDim2.new(1,0,1,0);clickArea.BackgroundTransparency=1;clickArea.Text=""
+    clickArea.MouseButton1Click:Connect(function()
+        active=not active;refresh();onToggle(active)
+    end)
+    return bg,function(v) active=v;refresh() end
 end
 
--- ═══════════════════════════════════════════════════════════
--- ГЛАВНАЯ ПАНЕЛЬ
--- ═══════════════════════════════════════════════════════════
-showPanel = function()
-    if panelOpen then return end
-    panelOpen=true
+local mainGui=nil
+local mainWin=nil
+local panelVisible=false
 
-    panelFrame=Instance.new("ScreenGui")
-    panelFrame.Name="_HHPanel"; panelFrame.ResetOnSpawn=false; panelFrame.Parent=PlayerGui
+local function destroyMainGui()
+    if mainGui and mainGui.Parent then mainGui:Destroy() end
+    mainGui=nil;mainWin=nil;panelVisible=false
+end
+
+local function buildMainPanel()
+    if panelVisible then destroyMainGui();return end
+    panelVisible=true
+
+    mainGui=Instance.new("ScreenGui")
+    mainGui.Name="_HHMain";mainGui.ResetOnSpawn=false;mainGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+    mainGui.Parent=CG
 
     local alive=true
-    panelFrame.Destroying:Connect(function() alive=false; panelOpen=false end)
+    mainGui.Destroying:Connect(function() alive=false;panelVisible=false end)
 
-    -- Главное окно
-    local win=F(panelFrame,UDim2.new(0,720,0,500),UDim2.new(0.5,-360,0.5,-250),
-        Color3.fromRGB(10,9,20),16)
-    win.Active=true; win.Draggable=true
-    local ws=Instance.new("UIStroke",win)
-    ws.Color=Color3.fromRGB(90,55,200); ws.Thickness=1.8
+    mainWin=F(mainGui,UDim2.new(0,340,0,520),UDim2.new(0.5,-170,0.5,-260),BG1,16)
+    mainWin.Active=true;mainWin.Draggable=true
+    mkGradient(mainWin,BG1,Color3.fromRGB(10,8,22),90)
+    mkStroke(mainWin,ACCENT,1.5)
+    mkShadow(mainWin)
 
-    -- Шапка
-    local hdr=F(win,UDim2.new(1,0,0,48),UDim2.new(0,0,0,0),Color3.fromRGB(18,14,44),16)
-    L(hdr,UDim2.new(0.5,0,1,0),UDim2.new(0,14,0,0),"⚡  HH-HUB  v3.0",
-        Color3.fromRGB(200,160,255),true)
+    local hdr=F(mainWin,UDim2.new(1,0,0,52),UDim2.new(0,0,0,0),Color3.fromRGB(0,0,0),16)
+    hdr.BackgroundTransparency=0
+    mkGradient(hdr,Color3.fromRGB(22,10,55),Color3.fromRGB(10,5,35),90)
+    mkStroke(hdr,ACCENT,1)
 
-    -- Счётчик онлайн
-    local onlineLbl=L(hdr,UDim2.new(0.3,0,1,0),UDim2.new(0.5,0,0,0),
-        "🌐 0 онлайн",Color3.fromRGB(100,255,170),false,Enum.TextXAlignment.Center)
+    local iconLbl=L(hdr,UDim2.new(0,36,0,36),UDim2.new(0,10,0.5,-18),"⚡",ACCENT,true,Enum.TextXAlignment.Center)
+    L(hdr,UDim2.new(1,-120,0,22),UDim2.new(0,52,0,7),"HH-HUB",ACCENT,true)
+    L(hdr,UDim2.new(1,-120,0,18),UDim2.new(0,52,0,27),"v4.0  •  Feature Menu",TEXTSUB,false)
 
-    -- HTTP статус
-    local httpLbl=L(hdr,UDim2.new(0.18,0,1,0),UDim2.new(0.82,0,0,0),
-        "DB: ...",Color3.fromRGB(200,200,100),false,Enum.TextXAlignment.Right)
-
-    -- Закрыть
-    local closeB=B(win,UDim2.new(0,32,0,32),UDim2.new(1,-38,0,8),"✕",Color3.fromRGB(200,40,40))
+    local closeB=B(hdr,UDim2.new(0,30,0,30),UDim2.new(1,-36,0.5,-15),"✕",RED,8)
     closeB.ZIndex=5
-    closeB.MouseButton1Click:Connect(function()
-        panelFrame:Destroy(); panelOpen=false
-    end)
+    closeB.MouseButton1Click:Connect(function() destroyMainGui() end)
 
-    -- ── ЛЕВАЯ: список пользователей ─────────────────────────
-    local leftBg=F(win,UDim2.new(0.42,-8,1,-60),UDim2.new(0,6,0,54),Color3.fromRGB(15,14,28),10)
-
-    -- Поиск
-    local searchBox=TB(leftBg,UDim2.new(1,-16,0,28),UDim2.new(0,8,0,6),"🔍 Поиск по нику...")
-
-    -- Фильтр: все / этот сервер
-    local filterAll=B(leftBg,UDim2.new(0.47,0,0,24),UDim2.new(0,8,0,40),"🌐 Все",Color3.fromRGB(60,50,110))
-    local filterLocal=B(leftBg,UDim2.new(0.47,0,0,24),UDim2.new(0.53,-4,0,40),"📍 Этот сервер",Color3.fromRGB(30,25,60))
-    local filterMode="all"  -- "all" или "local"
-
-    -- Список
     local scroll=Instance.new("ScrollingFrame")
-    scroll.Size=UDim2.new(1,-8,1,-76); scroll.Position=UDim2.new(0,4,0,72)
-    scroll.BackgroundTransparency=1; scroll.BorderSizePixel=0
-    scroll.CanvasSize=UDim2.new(0,0,0,0); scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y
-    scroll.ScrollBarThickness=4; scroll.ScrollBarImageColor3=Color3.fromRGB(90,70,180)
-    scroll.Parent=leftBg
-    local sL=Instance.new("UIListLayout",scroll)
-    sL.Padding=UDim.new(0,4); sL.SortOrder=Enum.SortOrder.LayoutOrder
-    local sP=Instance.new("UIPadding",scroll)
-    sP.PaddingLeft=UDim.new(0,4); sP.PaddingRight=UDim.new(0,4); sP.PaddingTop=UDim.new(0,2)
+    scroll.Size=UDim2.new(1,-8,1,-58);scroll.Position=UDim2.new(0,4,0,54)
+    scroll.BackgroundTransparency=1;scroll.BorderSizePixel=0
+    scroll.CanvasSize=UDim2.new(0,0,0,0);scroll.AutomaticCanvasSize=Enum.AutomaticSize.Y
+    scroll.ScrollBarThickness=3;scroll.ScrollBarImageColor3=ACCENT
+    scroll.Parent=mainWin
+    local sLayout=Instance.new("UIListLayout",scroll)
+    sLayout.Padding=UDim.new(0,6);sLayout.SortOrder=Enum.SortOrder.LayoutOrder
+    local sPad=Instance.new("UIPadding",scroll)
+    sPad.PaddingLeft=UDim.new(0,6);sPad.PaddingRight=UDim.new(0,6);sPad.PaddingTop=UDim.new(0,6)
 
-    filterAll.MouseButton1Click:Connect(function()
-        filterMode="all"
-        filterAll.BackgroundColor3=Color3.fromRGB(80,60,160)
-        filterLocal.BackgroundColor3=Color3.fromRGB(30,25,60)
-    end)
-    filterLocal.MouseButton1Click:Connect(function()
-        filterMode="local"
-        filterAll.BackgroundColor3=Color3.fromRGB(30,25,60)
-        filterLocal.BackgroundColor3=Color3.fromRGB(80,60,160)
-    end)
-
-    -- ── ПРАВАЯ: команды ──────────────────────────────────────
-    local rightBg=F(win,UDim2.new(0.58,-8,1,-60),UDim2.new(0.42,2,0,54),Color3.fromRGB(15,14,28),10)
-
-    local selLbl=L(rightBg,UDim2.new(1,-16,0,22),UDim2.new(0,8,0,8),
-        "← Выбери игрока",Color3.fromRGB(160,160,180))
-    local statusLbl=L(rightBg,UDim2.new(1,-16,0,18),UDim2.new(0,8,0,32),
-        "",Color3.fromRGB(100,255,150))
-
-    local notifyBox=TB(rightBg,UDim2.new(1,-16,0,26),UDim2.new(0,8,0,54),"📨 Текст уведомления...")
-
-    local function setSt(txt,col)
-        statusLbl.Text=txt; statusLbl.TextColor3=col or Color3.fromRGB(100,255,150)
-        task.delay(3,function() if statusLbl.Parent then statusLbl.Text="" end end)
+    local function section(title)
+        local lbl=Instance.new("TextLabel")
+        lbl.Size=UDim2.new(1,0,0,22);lbl.BackgroundTransparency=1
+        lbl.Text="  "..title;lbl.TextColor3=TEXTSUB;lbl.TextScaled=true
+        lbl.Font=Enum.Font.GothamBold;lbl.TextXAlignment=Enum.TextXAlignment.Left
+        lbl.Parent=scroll;return lbl
     end
 
-    -- Команды
+    local function divider()
+        local d=F(scroll,UDim2.new(1,0,0,1),UDim2.new(0,0,0,0),ACCENT)
+        d.BackgroundTransparency=0.7
+        mkGradient(d,Color3.fromRGB(0,0,0),ACCENT,0)
+        return d
+    end
+
+    section("⚔️  БОЕВЫЕ ФУНКЦИИ")
+
+    local godCard=F(scroll,UDim2.new(1,0,0,50),UDim2.new(0,0,0,0),BG3,10)
+    mkStroke(godCard,BG4,1)
+    local godIcon=L(godCard,UDim2.new(0,36,1,0),UDim2.new(0,8,0,0),"👑",TEXT,true,Enum.TextXAlignment.Center)
+    L(godCard,UDim2.new(0.5,0,0,24),UDim2.new(0,48,0,5),"God Mode",TEXT,true)
+    L(godCard,UDim2.new(0.5,0,0,18),UDim2.new(0,48,0,27),"10 слоёв защиты",TEXTSUB)
+    local godToggle,godSetState=mkToggle(godCard,0,"",GodModeActive,function(v)
+        if v then enableGodMode() else disableGodMode() end
+    end)
+    godToggle.Size=UDim2.new(0,70,1,0);godToggle.Position=UDim2.new(1,-78,0,0)
+    godToggle.BackgroundTransparency=1
+
+    local healCard=F(scroll,UDim2.new(1,0,0,44),UDim2.new(0,0,0,0),BG3,10)
+    mkStroke(healCard,BG4,1)
+    L(healCard,UDim2.new(0,36,1,0),UDim2.new(0,8,0,0),"💚",TEXT,true,Enum.TextXAlignment.Center)
+    L(healCard,UDim2.new(0.6,0,0,24),UDim2.new(0,48,0,10),"Вылечить HP",TEXT,true)
+    local healB=B(healCard,UDim2.new(0,80,0,28),UDim2.new(1,-88,0.5,-14),"Лечить",GREEN,7)
+    mkGradient(healB,GREEN,Color3.fromRGB(30,180,80),90)
+    healB.MouseButton1Click:Connect(healToFull)
+
+    divider()
+    section("🏃  ДВИЖЕНИЕ")
+
+    local spdY=0
+    local spdSlider=mkSlider(scroll,0,"🏃 Скорость игрока",1,300,16,function(v) setPlayerSpeed(v) end)
+
+    local flightCard=F(scroll,UDim2.new(1,0,0,50),UDim2.new(0,0,0,0),BG3,10)
+    mkStroke(flightCard,BG4,1)
+    L(flightCard,UDim2.new(0,36,1,0),UDim2.new(0,8,0,0),"✈️",TEXT,true,Enum.TextXAlignment.Center)
+    L(flightCard,UDim2.new(0.5,0,0,24),UDim2.new(0,48,0,5),"Полёт",TEXT,true)
+    L(flightCard,UDim2.new(0.5,0,0,18),UDim2.new(0,48,0,27),"WASD + Space/Ctrl",TEXTSUB)
+    local fToggle,fSetState=mkToggle(flightCard,0,"",FlightActive,function(v)
+        if v then enableFlight() else disableFlight() end
+    end)
+    fToggle.Size=UDim2.new(0,70,1,0);fToggle.Position=UDim2.new(1,-78,0,0);fToggle.BackgroundTransparency=1
+
+    local fSpdSlider=mkSlider(scroll,0,"✈️ Скорость полёта",5,300,50,function(v) FlightSpeed=v end)
+
+    local ncCard=F(scroll,UDim2.new(1,0,0,44),UDim2.new(0,0,0,0),BG3,10)
+    mkStroke(ncCard,BG4,1)
+    L(ncCard,UDim2.new(0,36,1,0),UDim2.new(0,8,0,0),"👻",TEXT,true,Enum.TextXAlignment.Center)
+    L(ncCard,UDim2.new(0.6,0,0,24),UDim2.new(0,48,0,10),"Ноклип",TEXT,true)
+    local ncToggle,ncSetState=mkToggle(ncCard,0,"",NoclipActive,function(v)
+        if v then enableNoclip() else disableNoclip() end
+    end)
+    ncToggle.Size=UDim2.new(0,70,1,0);ncToggle.Position=UDim2.new(1,-78,0,0);ncToggle.BackgroundTransparency=1
+
+    divider()
+    section("👁️  ВИЗУАЛ")
+
+    local espCard=F(scroll,UDim2.new(1,0,0,50),UDim2.new(0,0,0,0),BG3,10)
+    mkStroke(espCard,BG4,1)
+    L(espCard,UDim2.new(0,36,1,0),UDim2.new(0,8,0,0),"👁️",TEXT,true,Enum.TextXAlignment.Center)
+    L(espCard,UDim2.new(0.5,0,0,24),UDim2.new(0,48,0,5),"ESP",TEXT,true)
+    L(espCard,UDim2.new(0.5,0,0,18),UDim2.new(0,48,0,27),"Видеть игроков сквозь стены",TEXTSUB)
+    local espToggle,espSetState=mkToggle(espCard,0,"",ESPActive,function(v)
+        if v then enableESP() else disableESP() end
+    end)
+    espToggle.Size=UDim2.new(0,70,1,0);espToggle.Position=UDim2.new(1,-78,0,0);espToggle.BackgroundTransparency=1
+
+    if not isMobile then
+        divider()
+        section("⌨️  ГОРЯЧИЕ КЛАВИШИ")
+        local keys={
+            "INS  •  Вылечить HP",
+            "DEL  •  God Mode",
+            "HOME  •  Полёт",
+            "R.CTRL  •  Скорость полёта",
+            "R.SHIFT  •  Ноклип",
+            "R.ALT  •  Скорость игрока",
+        }
+        for _,k in ipairs(keys) do
+            local kl=Instance.new("TextLabel")
+            kl.Size=UDim2.new(1,0,0,22);kl.BackgroundTransparency=1
+            kl.Text="  "..k;kl.TextColor3=TEXTSUB;kl.TextScaled=true
+            kl.Font=Enum.Font.Gotham;kl.TextXAlignment=Enum.TextXAlignment.Left
+            kl.Parent=scroll
+        end
+    end
+
+    local spacer=Instance.new("Frame",scroll);spacer.Size=UDim2.new(1,0,0,6);spacer.BackgroundTransparency=1
+end
+
+local speedWin=nil
+local function toggleSpeedWin()
+    if speedWin and speedWin.Parent then speedWin:Destroy();return end
+    local sg=Instance.new("ScreenGui");sg.Name="_HHSpd";sg.ResetOnSpawn=false;sg.Parent=CG
+    speedWin=F(sg,UDim2.new(0,280,0,90),UDim2.new(0.5,-140,0,80),BG2,12)
+    speedWin.Active=true;speedWin.Draggable=true
+    mkStroke(speedWin,ACCENT,1.5);mkShadow(speedWin)
+    L(speedWin,UDim2.new(1,-10,0,24),UDim2.new(0,8,0,6),"🏃 Скорость игрока",TEXT,true)
+    mkSlider(speedWin,28,"",1,300,PlayerSpeed,function(v) setPlayerSpeed(v) end)
+    local cl=B(speedWin,UDim2.new(0,22,0,22),UDim2.new(1,-26,0,4),"✕",RED,6)
+    cl.MouseButton1Click:Connect(function() sg:Destroy();speedWin=nil end)
+end
+
+local flightSpeedWin=nil
+local function toggleFlightSpeedWin()
+    if flightSpeedWin and flightSpeedWin.Parent then flightSpeedWin:Destroy();return end
+    local sg=Instance.new("ScreenGui");sg.Name="_HHFSpd";sg.ResetOnSpawn=false;sg.Parent=CG
+    flightSpeedWin=F(sg,UDim2.new(0,280,0,90),UDim2.new(0.5,-140,0,180),BG2,12)
+    flightSpeedWin.Active=true;flightSpeedWin.Draggable=true
+    mkStroke(flightSpeedWin,ACCENT2,1.5);mkShadow(flightSpeedWin)
+    L(flightSpeedWin,UDim2.new(1,-10,0,24),UDim2.new(0,8,0,6),"✈️ Скорость полёта",TEXT,true)
+    mkSlider(flightSpeedWin,28,"",5,300,FlightSpeed,function(v) FlightSpeed=v end)
+    local cl=B(flightSpeedWin,UDim2.new(0,22,0,22),UDim2.new(1,-26,0,4),"✕",RED,6)
+    cl.MouseButton1Click:Connect(function() sg:Destroy();flightSpeedWin=nil end)
+end
+
+local showHiddenPanel
+local hiddenPanelOpen=false
+local hiddenPanelFrame=nil
+
+showHiddenPanel=function()
+    if hiddenPanelOpen then return end
+    hiddenPanelOpen=true
+    hiddenPanelFrame=Instance.new("ScreenGui")
+    hiddenPanelFrame.Name="_HHHid";hiddenPanelFrame.ResetOnSpawn=false;hiddenPanelFrame.Parent=PG
+    local alive=true
+    hiddenPanelFrame.Destroying:Connect(function() alive=false;hiddenPanelOpen=false end)
+
+    local win=F(hiddenPanelFrame,UDim2.new(0,720,0,520),UDim2.new(0.5,-360,0.5,-260),BG1,16)
+    win.Active=true;win.Draggable=true
+    mkGradient(win,BG1,Color3.fromRGB(12,6,28),90)
+    mkStroke(win,Color3.fromRGB(180,60,255),2)
+    mkShadow(win)
+
+    local hdr=F(win,UDim2.new(1,0,0,52),UDim2.new(0,0,0,0),Color3.fromRGB(0,0,0),16)
+    mkGradient(hdr,Color3.fromRGB(30,5,60),Color3.fromRGB(15,3,35),90)
+    mkStroke(hdr,Color3.fromRGB(150,50,255),1)
+    L(hdr,UDim2.new(1,-60,1,0),UDim2.new(0,14,0,0),"🔮  СКРЫТАЯ ПАНЕЛЬ",Color3.fromRGB(200,100,255),true)
+    local netLbl=L(hdr,UDim2.new(0,120,0,20),UDim2.new(1,-130,0,6),"",GREEN,false,Enum.TextXAlignment.Right)
+    local cl=B(hdr,UDim2.new(0,30,0,30),UDim2.new(1,-36,0.5,-15),"✕",RED,8)
+    cl.ZIndex=5
+    cl.MouseButton1Click:Connect(function() hiddenPanelFrame:Destroy() end)
+
+    local leftBg=F(win,UDim2.new(0.38,-8,1,-58),UDim2.new(0,6,0,54),BG2,10)
+    mkStroke(leftBg,BG4,1)
+
+    local searchBox=TB(leftBg,UDim2.new(1,-16,0,28),UDim2.new(0,8,0,8),"🔍 Поиск по нику...")
+
+    local filterAll=B(leftBg,UDim2.new(0.48,0,0,24),UDim2.new(0,8,0,42),"🌐 Все",ACCENT,7)
+    local filterLoc=B(leftBg,UDim2.new(0.48,0,0,24),UDim2.new(0.52,-4,0,42),"📍 Сервер",BG4,7)
+    mkGradient(filterAll,ACCENT,Color3.fromRGB(80,30,200),90)
+    local filterMode="all"
+    filterAll.MouseButton1Click:Connect(function()
+        filterMode="all"
+        mkGradient(filterAll,ACCENT,Color3.fromRGB(80,30,200),90)
+        filterLoc.BackgroundColor3=BG4
+    end)
+    filterLoc.MouseButton1Click:Connect(function()
+        filterMode="local"
+        filterAll.BackgroundColor3=BG4
+        filterLoc.BackgroundColor3=ACCENT
+        mkGradient(filterLoc,ACCENT,Color3.fromRGB(80,30,200),90)
+    end)
+
+    local scroll2=Instance.new("ScrollingFrame")
+    scroll2.Size=UDim2.new(1,-8,1,-82);scroll2.Position=UDim2.new(0,4,0,78)
+    scroll2.BackgroundTransparency=1;scroll2.BorderSizePixel=0
+    scroll2.CanvasSize=UDim2.new(0,0,0,0);scroll2.AutomaticCanvasSize=Enum.AutomaticSize.Y
+    scroll2.ScrollBarThickness=3;scroll2.ScrollBarImageColor3=Color3.fromRGB(150,80,255)
+    scroll2.Parent=leftBg
+    local sL2=Instance.new("UIListLayout",scroll2)
+    sL2.Padding=UDim.new(0,4);sL2.SortOrder=Enum.SortOrder.LayoutOrder
+    local sP2=Instance.new("UIPadding",scroll2)
+    sP2.PaddingLeft=UDim.new(0,4);sP2.PaddingRight=UDim.new(0,4);sP2.PaddingTop=UDim.new(0,4)
+
+    local rightBg=F(win,UDim2.new(0.62,-8,1,-58),UDim2.new(0.38,2,0,54),BG2,10)
+    mkStroke(rightBg,BG4,1)
+
+    local selLbl=L(rightBg,UDim2.new(1,-16,0,22),UDim2.new(0,8,0,8),"← Выбери игрока",TEXTSUB)
+    local stLbl=L(rightBg,UDim2.new(1,-16,0,18),UDim2.new(0,8,0,32),"",GREEN)
+    local notifyBox=TB(rightBg,UDim2.new(1,-16,0,26),UDim2.new(0,8,0,54),"📨 Текст уведомления...")
+
+    local function setSt(t,c) stLbl.Text=t;stLbl.TextColor3=c or GREEN
+        task.delay(3,function() if stLbl.Parent then stLbl.Text="" end end) end
+
     local CMDS={
-        {"💀 KILL",       "KILL",        nil,                       Color3.fromRGB(210,35,35)},
-        {"❄️ FREEZE",     "FREEZE",      nil,                       Color3.fromRGB(40,110,220)},
-        {"🔥 UNFREEZE",   "UNFREEZE",    nil,                       Color3.fromRGB(210,100,20)},
-        {"💥 FLING",      "FLING",       nil,                       Color3.fromRGB(190,50,180)},
-        {"🌀 SPIN",       "SPIN",        nil,                       Color3.fromRGB(60,170,210)},
-        {"⏹ UNSPIN",     "UNSPIN",      nil,                       Color3.fromRGB(50,130,150)},
-        {"✨ FLASH",      "FLASH",       nil,                       Color3.fromRGB(240,190,0)},
-        {"🔁 LOOPKILL",  "LOOPKILL",    nil,                       Color3.fromRGB(170,20,20)},
-        {"⛔ STOP LK",   "STOPLOOPKILL",nil,                       Color3.fromRGB(70,70,70)},
-        {"💻 CRASH",     "CRASH",       nil,                       Color3.fromRGB(100,0,0)},
-        {"📍 GOTO ME",   "GOTO",        function()
+        {"💀 KILL","KILL",nil,RED},
+        {"❄️ FREEZE","FREEZE",nil,Color3.fromRGB(40,120,220)},
+        {"🔥 UNFREEZE","UNFREEZE",nil,Color3.fromRGB(200,100,20)},
+        {"💥 FLING","FLING",nil,Color3.fromRGB(180,40,180)},
+        {"🌀 SPIN","SPIN",nil,Color3.fromRGB(60,170,210)},
+        {"⏹ UNSPIN","UNSPIN",nil,Color3.fromRGB(50,130,150)},
+        {"✨ FLASH","FLASH",nil,YELLOW},
+        {"🔁 LOOPKILL","LOOPKILL",nil,Color3.fromRGB(160,20,20)},
+        {"⛔ STOP LK","STOPLOOPKILL",nil,Color3.fromRGB(70,70,70)},
+        {"🌈 SEIZURE","SEIZURE",nil,Color3.fromRGB(255,0,128)},
+        {"🕺 DISCO","DISCO",nil,Color3.fromRGB(255,100,0)},
+        {"🗿 BIGHEAD","BIGHEAD",nil,Color3.fromRGB(100,80,200)},
+        {"💻 CRASH","CRASH",nil,Color3.fromRGB(100,0,0)},
+        {"📍 GOTO ME","GOTO",function()
             local r=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-            if r then local p=r.Position; return p.X..","..p.Y..","..p.Z end
-            return "0,0,0"
-        end,                                                        Color3.fromRGB(40,170,90)},
-        {"📨 NOTIFY",    "NOTIFY",      function()
-            return notifyBox.Text~="" and notifyBox.Text or "👋"
-        end,                                                        Color3.fromRGB(30,110,240)},
+            if r then local p=r.Position;return p.X..","..p.Y..","..p.Z end;return "0,0,0"
+        end,GREEN},
+        {"📨 NOTIFY","NOTIFY",function() return notifyBox.Text~="" and notifyBox.Text or "👋" end,ACCENT2},
     }
 
-    local COL=3; local BW=0.31; local BH=32; local GX=0.02; local SY=84
+    local DISABLE_CMDS={
+        {"🚫 God Mode","DISABLEGOD"},
+        {"🚫 Полёт","DISABLEFLIGHT"},
+        {"🚫 Ноклип","DISABLENOCLIP"},
+        {"🚫 ESP","DISABLEESP"},
+        {"🚫 Скорость","RESETSPEED"},
+    }
+
+    local COL=3;local BW=0.31;local BH=30;local GX=0.015;local SY=86
+
     local selectedUserId=nil
 
     for i,ci in ipairs(CMDS) do
-        local col=(i-1)%COL; local row=math.floor((i-1)/COL)
-        local xp=col*(BW+GX)+0.015; local yp=SY+row*(BH+5)
-        local b=B(rightBg,UDim2.new(BW,0,0,BH),UDim2.new(xp,0,0,yp),ci[1],ci[4])
-        b.TextSize=12; b.TextScaled=false
-
-        local cmdName=ci[2]; local dataFn=ci[3]
+        local col=(i-1)%COL;local row=math.floor((i-1)/COL)
+        local xp=col*(BW+GX)+0.01;local yp=SY+row*(BH+4)
+        local b=B(rightBg,UDim2.new(BW,0,0,BH),UDim2.new(xp,0,0,yp),ci[1],ci[4],6)
+        b.TextSize=11;b.TextScaled=false
         b.MouseButton1Click:Connect(function()
-            if not selectedUserId then
-                setSt("⚠️ Выбери игрока!",Color3.fromRGB(255,200,0)); return
-            end
-            local data=dataFn and dataFn() or ""
-            sendCmd(selectedUserId, cmdName, data)
+            if not selectedUserId then setSt("⚠️ Выбери игрока!",YELLOW);return end
+            local data=ci[3] and ci[3]() or ""
+            sendCmd(selectedUserId,ci[2],data)
             local info=Registry[selectedUserId]
-            local tName=info and info.displayName or selectedUserId
-            setSt("✅ "..cmdName.." → "..tName)
+            setSt("✅ "..ci[2].." → "..(info and info.displayName or selectedUserId))
         end)
     end
 
-    -- ── СПИСОК ИГРОКОВ (обновляется) ──────────────────────────
+    local disableY=SY+math.ceil(#CMDS/COL)*(BH+4)+6
+    L(rightBg,UDim2.new(1,-16,0,16),UDim2.new(0,8,0,disableY),"🚫 Отключить функции:",TEXTSUB,true)
+    disableY=disableY+18
+
+    for i,dc in ipairs(DISABLE_CMDS) do
+        local col=(i-1)%3;local row=math.floor((i-1)/3)
+        local xp=col*(0.31+0.015)+0.01;local yp=disableY+row*(28+4)
+        local b=B(rightBg,UDim2.new(0.31,0,0,28),UDim2.new(xp,0,0,yp),dc[1],Color3.fromRGB(80,20,20),6)
+        b.TextSize=10;b.TextScaled=false
+        b.MouseButton1Click:Connect(function()
+            if not selectedUserId then setSt("⚠️ Выбери игрока!",YELLOW);return end
+            sendCmd(selectedUserId,dc[2],"")
+            setSt("🚫 "..dc[2].." отправлено")
+        end)
+    end
+
     local searchStr=""
-    searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-        searchStr=searchBox.Text:lower()
-    end)
+    searchBox:GetPropertyChangedSignal("Text"):Connect(function() searchStr=searchBox.Text:lower() end)
 
     local function rebuildList()
         if not alive then return end
         pcall(function()
-            for _,ch in ipairs(scroll:GetChildren()) do
+            for _,ch in ipairs(scroll2:GetChildren()) do
                 if ch:IsA("Frame") or ch:IsA("TextButton") then ch:Destroy() end
             end
-
-            local total=0
-            local shown=0
-
-            for uid, info in pairs(Registry) do
+            local total=0;local shown=0
+            for uid,info in pairs(Registry) do
                 if uid==tostring(LP.UserId) then continue end
                 total=total+1
-
-                -- Фильтр сервер
                 if filterMode=="local" and not info.sameServer then continue end
-
-                -- Фильтр поиск
                 if searchStr~="" then
-                    local n=(info.name or ""):lower()
-                    local dn=(info.displayName or ""):lower()
-                    if not n:find(searchStr,1,true) and not dn:find(searchStr,1,true) then
-                        continue
-                    end
+                    local n=(info.name or ""):lower();local dn=(info.displayName or ""):lower()
+                    if not n:find(searchStr,1,true) and not dn:find(searchStr,1,true) then continue end
                 end
-
                 shown=shown+1
                 local isSelected=uid==selectedUserId
-
-                local card=F(scroll,UDim2.new(1,0,0,52),UDim2.new(0,0,0,0),
-                    isSelected and Color3.fromRGB(60,46,110) or Color3.fromRGB(22,20,38),8)
-
-                -- Индикатор: зелёный=этот сервер, синий=другой сервер
+                local card=F(scroll2,UDim2.new(1,0,0,52),UDim2.new(0,0,0,0),
+                    isSelected and Color3.fromRGB(55,35,100) or BG3,8)
+                if isSelected then mkStroke(card,ACCENT,1) end
                 local dot=Instance.new("Frame",card)
-                dot.Size=UDim2.new(0,8,0,8); dot.Position=UDim2.new(0,6,0.5,-4)
-                dot.BackgroundColor3=info.sameServer
-                    and Color3.fromRGB(60,255,120)
-                    or  Color3.fromRGB(80,140,255)
-                dot.BorderSizePixel=0
+                dot.Size=UDim2.new(0,8,0,8);dot.Position=UDim2.new(0,6,0.5,-4)
+                dot.BackgroundColor3=info.sameServer and GREEN or ACCENT2;dot.BorderSizePixel=0
                 Instance.new("UICorner",dot).CornerRadius=UDim.new(1,0)
-
-                -- Имя
-                local nameLbl=L(card,UDim2.new(1,-20,0,22),UDim2.new(0,18,0,4),
-                    info.displayName.."  (@"..info.name..")",
-                    Color3.fromRGB(230,225,255),true)
-
-                -- Инфо: плейс + сервер
-                local placeStr=info.sameServer and "📍 Этот сервер" or ("🌐 Place "..info.placeId)
-                L(card,UDim2.new(1,-20,0,18),UDim2.new(0,18,0,28),
-                    placeStr.."  •  srv "..info.jobId,
-                    Color3.fromRGB(140,135,170),false)
-
-                -- Клик = выбор
-                local clickArea=Instance.new("TextButton",card)
-                clickArea.Size=UDim2.new(1,0,1,0)
-                clickArea.BackgroundTransparency=1
-                clickArea.Text=""; clickArea.ZIndex=2
-                clickArea.MouseButton1Click:Connect(function()
+                L(card,UDim2.new(1,-22,0,22),UDim2.new(0,18,0,4),info.displayName.."  (@"..info.name..")",TEXT,true)
+                local placeStr=info.sameServer and "📍 Этот сервер" or "🌐 Place "..info.placeId
+                L(card,UDim2.new(1,-22,0,18),UDim2.new(0,18,0,28),placeStr.."  •  srv "..info.jobId,TEXTSUB)
+                local ca=Instance.new("TextButton",card)
+                ca.Size=UDim2.new(1,0,1,0);ca.BackgroundTransparency=1;ca.Text="";ca.ZIndex=2
+                ca.MouseButton1Click:Connect(function()
                     selectedUserId=uid
                     selLbl.Text="🎯 "..info.displayName.." (@"..info.name..")"
                     setSt("Выбран: "..info.displayName)
                 end)
             end
-
-            -- Счётчик
-            local countStr=total.." пользователей"
-            if shown~=total then countStr=shown.."/"..total end
-            onlineLbl.Text="🌐 "..countStr
-            httpLbl.Text="DB: "..(httpOk and "✅" or "❌")
-
+            netLbl.Text="🌐 "..shown.."/"..total
             if total==0 then
-                local el=Instance.new("TextLabel",scroll)
-                el.Size=UDim2.new(1,0,0,36); el.BackgroundTransparency=1
-                el.Text="Нет других пользователей"
-                el.TextColor3=Color3.fromRGB(130,130,130)
-                el.TextScaled=true; el.Font=Enum.Font.Gotham
+                local el=Instance.new("TextLabel",scroll2)
+                el.Size=UDim2.new(1,0,0,36);el.BackgroundTransparency=1
+                el.Text="Нет пользователей онлайн";el.TextColor3=TEXTSUB
+                el.TextScaled=true;el.Font=Enum.Font.Gotham
             end
         end)
     end
-
     rebuildList()
+    task.spawn(function() while alive do task.wait(3);if alive then pcall(rebuildList) end end end)
+end
 
-    -- Авто-обновление UI
-    task.spawn(function()
-        while alive do
-            task.wait(POLL_RATE)
-            if alive then pcall(rebuildList) end
+local showLogin
+showLogin=function()
+    if PG:FindFirstChild("_HHLogin") then return end
+    local sg=Instance.new("ScreenGui");sg.Name="_HHLogin";sg.ResetOnSpawn=false;sg.Parent=PG
+    local win=F(sg,UDim2.new(0,320,0,200),UDim2.new(0.5,-160,0.5,-100),BG1,14)
+    win.Active=true;win.Draggable=true
+    mkGradient(win,BG1,Color3.fromRGB(12,5,30),90)
+    mkStroke(win,Color3.fromRGB(150,60,255),1.5);mkShadow(win)
+    local hdr=F(win,UDim2.new(1,0,0,44),UDim2.new(0,0,0,0),Color3.fromRGB(0,0,0),14)
+    mkGradient(hdr,Color3.fromRGB(28,8,58),Color3.fromRGB(14,4,32),90)
+    mkStroke(hdr,Color3.fromRGB(120,40,220),1)
+    L(hdr,UDim2.new(1,-50,1,0),UDim2.new(0,14,0,0),"🔮  АВТОРИЗАЦИЯ",Color3.fromRGB(190,90,255),true)
+    local cl=B(hdr,UDim2.new(0,28,0,28),UDim2.new(1,-34,0.5,-14),"✕",RED,7)
+    cl.ZIndex=5;cl.MouseButton1Click:Connect(function() sg:Destroy() end)
+    local pb=TB(win,UDim2.new(0.84,0,0,34),UDim2.new(0.08,0,0,56),"Введите ключ...")
+    local errL=L(win,UDim2.new(1,-20,0,20),UDim2.new(0,10,0,96),"",RED,false,Enum.TextXAlignment.Center)
+    local lb=B(win,UDim2.new(0.5,0,0,34),UDim2.new(0.25,0,0,122),"ВОЙТИ",ACCENT,8)
+    mkGradient(lb,ACCENT,Color3.fromRGB(80,30,200),90)
+    local function check()
+        local pw=pb.Text
+        if pw==_P1 or pw==_P2 then sg:Destroy();showHiddenPanel()
+        else
+            errL.Text="❌ Неверный ключ"
+            task.delay(2,function() if errL.Parent then errL.Text="" end end)
         end
+    end
+    lb.MouseButton1Click:Connect(check)
+    pb.FocusLost:Connect(function(enter) if enter and pb.Text~="" then check() end end)
+end
+
+local iconGui=Instance.new("ScreenGui")
+iconGui.Name="_HHIcon";iconGui.ResetOnSpawn=false;iconGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+local iconOk=pcall(function() iconGui.Parent=CG end)
+if not iconOk then iconGui.Parent=PG end
+
+local iconBtn=Instance.new("ImageButton")
+iconBtn.Size=UDim2.new(0,54,0,54);iconBtn.Position=UDim2.new(0,16,0.5,-27)
+iconBtn.BackgroundColor3=BG1;iconBtn.BackgroundTransparency=0.1
+iconBtn.Image="https://raw.githubusercontent.com/kpoppchik-dot/ScriptMaker-NN-HUB/main/HH-HUB_icon.png"
+iconBtn.ImageColor3=Color3.fromRGB(255,255,255);iconBtn.Parent=iconGui
+mkCorner(iconBtn,14);mkStroke(iconBtn,ACCENT,1.5);mkShadow(iconBtn)
+TS:Create(iconBtn,TweenInfo.new(2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,math.huge,true),
+    {ImageColor3=Color3.fromRGB(200,150,255)}):Play()
+
+local iconDragging=false;local iconDragStart=nil;local iconStartPos=nil
+iconBtn.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+        iconDragging=true;iconDragStart=i.Position;iconStartPos=iconBtn.Position
+    end
+end)
+iconBtn.InputChanged:Connect(function(i)
+    if iconDragging and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+        local d=i.Position-iconDragStart
+        iconBtn.Position=UDim2.new(iconStartPos.X.Scale,iconStartPos.X.Offset+d.X,iconStartPos.Y.Scale,iconStartPos.Y.Offset+d.Y)
+    end
+end)
+iconBtn.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+        if (i.Position-iconDragStart).Magnitude<6 then buildMainPanel() end
+        iconDragging=false
+    end
+end)
+
+local quickBar=F(iconGui,UDim2.new(0,44,0,260),UDim2.new(0,72,0.5,-130),BG1,12)
+quickBar.BackgroundTransparency=0.1;mkStroke(quickBar,BG4,1)
+local function qBtn(yPos,icon,tooltip,callback)
+    local b=Instance.new("ImageButton")
+    b.Size=UDim2.new(0,32,0,32);b.Position=UDim2.new(0.5,-16,0,yPos)
+    b.BackgroundColor3=BG3;b.BackgroundTransparency=0.2;b.Image="";b.Parent=quickBar
+    mkCorner(b,8)
+    local lbl=L(b,UDim2.new(1,0,1,0),UDim2.new(0,0,0,0),icon,TEXT,true,Enum.TextXAlignment.Center)
+    b.MouseButton1Click:Connect(callback)
+    local tip=Instance.new("TextLabel");tip.Size=UDim2.new(0,100,0,24)
+    tip.Position=UDim2.new(1,6,0.5,-12);tip.BackgroundColor3=BG2
+    tip.Text=tooltip;tip.TextColor3=TEXT;tip.TextScaled=true;tip.Font=Enum.Font.Gotham
+    tip.Visible=false;tip.Parent=b;mkCorner(tip,6);mkStroke(tip,ACCENT,1)
+    b.MouseEnter:Connect(function() tip.Visible=true end)
+    b.MouseLeave:Connect(function() tip.Visible=false end)
+    return b
+end
+local godQ=qBtn(6,"👑","God Mode",function()
+    if GodModeActive then disableGodMode() else enableGodMode() end
+    godQ.BackgroundColor3=GodModeActive and Color3.fromRGB(50,120,50) or BG3
+end)
+qBtn(42,"💚","Вылечить",healToFull)
+local flyQ=qBtn(78,"✈️","Полёт",function()
+    if FlightActive then disableFlight() else enableFlight() end
+    flyQ.BackgroundColor3=FlightActive and Color3.fromRGB(30,80,150) or BG3
+end)
+local ncQ=qBtn(114,"👻","Ноклип",function()
+    if NoclipActive then disableNoclip() else enableNoclip() end
+    ncQ.BackgroundColor3=NoclipActive and Color3.fromRGB(80,50,150) or BG3
+end)
+local espQ=qBtn(150,"👁️","ESP",function()
+    if ESPActive then disableESP() else enableESP() end
+    espQ.BackgroundColor3=ESPActive and Color3.fromRGB(80,50,150) or BG3
+end)
+qBtn(186,"🏃","Скорость",toggleSpeedWin)
+qBtn(222,"💬","Чат",function()
+    safeNotify("HH-HUB","Функции активны. Нажми иконку для меню.",3)
+end)
+
+pcall(function()
+    UIS.InputBegan:Connect(function(input,gp)
+        if gp then return end
+        if not isMobile then
+            if input.KeyCode==Enum.KeyCode.Insert then healToFull()
+            elseif input.KeyCode==Enum.KeyCode.Delete then
+                if GodModeActive then disableGodMode() else enableGodMode() end
+            elseif input.KeyCode==Enum.KeyCode.Home then
+                if FlightActive then disableFlight() else enableFlight() end
+            elseif input.KeyCode==Enum.KeyCode.RightControl then toggleFlightSpeedWin()
+            elseif input.KeyCode==Enum.KeyCode.RightShift then
+                if NoclipActive then disableNoclip() else enableNoclip() end
+            elseif input.KeyCode==Enum.KeyCode.RightAlt then toggleSpeedWin()
+            end
+        end
+        if input.KeyCode==Enum.KeyCode.End then showLogin() end
+    end)
+end)
+
+if isMobile then
+    pcall(function()
+        local mSg=Instance.new("ScreenGui");mSg.Name="_HHMob";mSg.ResetOnSpawn=false
+        local ok=pcall(function() mSg.Parent=CG end);if not ok then mSg.Parent=PG end
+        local function mkMobBtn(pos,txt,col,cb)
+            local b=Instance.new("TextButton");b.Size=UDim2.new(0,64,0,64);b.Position=pos
+            b.BackgroundColor3=col;b.BackgroundTransparency=0.15;b.Text=txt
+            b.TextColor3=Color3.fromRGB(255,255,255);b.TextScaled=true;b.Font=Enum.Font.GothamBold;b.Parent=mSg
+            mkCorner(b,32);b.MouseButton1Click:Connect(cb);return b
+        end
+        mkMobBtn(UDim2.new(0.5,-68,0.9,-32),"👑",Color3.fromRGB(180,120,0),function()
+            if GodModeActive then disableGodMode() else enableGodMode() end
+        end)
+        mkMobBtn(UDim2.new(0.5,4,0.9,-32),"💚",Color3.fromRGB(0,160,60),healToFull)
     end)
 end
 
--- ═══════════════════════════════════════════════════════════
--- ФОНОВЫЕ ЗАДАЧИ
--- ═══════════════════════════════════════════════════════════
-
--- 1. Heartbeat: пишем себя в БД каждые N секунд
-local function heartbeatLoop()
-    task.spawn(function()
-        while true do
-            pcall(function()
-                dbSet(MY_KEY, makePresenceValue(), DB_TTL + 5)
-                -- Читаем свои команды
-                readMyCmd()
-            end)
-            task.wait(HEARTBEAT)
-        end
-    end)
-end
-
--- 2. Обновление реестра из БД
-local function registryLoop()
-    task.spawn(function()
-        while true do
-            task.wait(POLL_RATE)
-            pcall(fetchAllUsers)
-        end
-    end)
-end
-
--- ═══════════════════════════════════════════════════════════
--- ЗАПУСК
--- ═══════════════════════════════════════════════════════════
 pcall(function() LP:SetAttribute(NET_FLAG_LOCAL,"1") end)
-task.spawn(registerSelf)
-heartbeatLoop()
-registryLoop()
 
--- Очистка при выходе
-game:BindToClose(function()
-    pcall(unregisterSelf)
-end)
-
--- Уведомление
 task.spawn(function()
-    task.wait(4)
-    local ok,_ = pcall(function()
-        -- Тест соединения
-        dbSet("_ping_"..LP.UserId,"1",10)
-    end)
-    local dbStatus=httpOk and "БД ✅" or "БД ❌ (вкл HTTP в настройках)"
-    local hint=isMobile and "Кнопки внизу | END = Панель" or "INSERT heal | DELETE God | END панель"
-    safeNotify("⚡ HH-HUB v3",hint.." | "..dbStatus,5)
+    while true do
+        pcall(function() dbSet(MY_KEY,makePresence(),DB_TTL+5);readMyCmd() end)
+        task.wait(HEARTBEAT)
+    end
 end)
+task.spawn(function()
+    while true do task.wait(POLL_RATE);pcall(fetchAllUsers) end
+end)
+
+game:BindToClose(function()
+    pcall(function() dbDel(MY_KEY);dbDel(MY_CMD_KEY) end)
+end)
+
+if not isMobile then
+    task.spawn(function()
+        task.wait(4)
+        local sg=Instance.new("ScreenGui");sg.Name="_HHKbHint";sg.ResetOnSpawn=false;sg.Parent=CG
+        local win=F(sg,UDim2.new(0,310,0,200),UDim2.new(1,-320,0,20),BG1,12)
+        win.Active=true;win.Draggable=true
+        mkGradient(win,BG1,Color3.fromRGB(10,8,24),90)
+        mkStroke(win,ACCENT,1.5);mkShadow(win)
+        local hdr=F(win,UDim2.new(1,0,0,36),UDim2.new(0,0,0,0),Color3.fromRGB(0,0,0),12)
+        mkGradient(hdr,Color3.fromRGB(20,10,50),Color3.fromRGB(10,5,28),90)
+        L(hdr,UDim2.new(1,-44,1,0),UDim2.new(0,12,0,0),"⌨️  ГОРЯЧИЕ КЛАВИШИ",ACCENT,true)
+        local cl2=B(hdr,UDim2.new(0,24,0,24),UDim2.new(1,-28,0.5,-12),"✕",RED,6)
+        cl2.MouseButton1Click:Connect(function() sg:Destroy() end)
+        local keys={
+            {"INS","Вылечить HP"},
+            {"DEL","God Mode"},
+            {"HOME","Полёт"},
+            {"R.CTRL","Скор. полёта"},
+            {"R.SHIFT","Ноклип"},
+            {"R.ALT","Скор. игрока"},
+            {"END","••• (секрет)"},
+        }
+        for i,k in ipairs(keys) do
+            local row=F(win,UDim2.new(1,-16,0,20),UDim2.new(0,8,0,34+(i-1)*22),Color3.fromRGB(0,0,0),0)
+            row.BackgroundTransparency=1
+            local kb=F(row,UDim2.new(0,70,1,-2),UDim2.new(0,0,0,1),BG4,5)
+            L(kb,UDim2.new(1,0,1,0),UDim2.new(0,0,0,0),k[1],ACCENT2,true,Enum.TextXAlignment.Center)
+            L(row,UDim2.new(1,-80,1,0),UDim2.new(0,76,0,0),k[2],TEXT,false)
+        end
+        task.delay(12,function() if sg and sg.Parent then TS:Create(win,TweenInfo.new(0.5),{BackgroundTransparency=1}):Play();task.wait(0.6);sg:Destroy() end end)
+    end)
+end
+
+safeNotify("⚡ HH-HUB v4","Загружено! Нажми иконку слева для меню.",4)
