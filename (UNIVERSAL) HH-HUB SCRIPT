@@ -36,7 +36,7 @@ local JSONBLOB_BASE = "https://jsonblob.com/api/jsonBlob/"
 -- 2. Вставьте {} и нажмите Save
 -- 3. Скопируйте ID из URL
 local PRESENCE_BLOB_ID = "019d0728-1ac9-7c7a-b122-8dcf486c6b5e"  -- ВАШ ID ДЛЯ ПРИСУТСТВИЯ
-local COMMANDS_BLOB_ID = "1343123871192776706"  -- ВАШ ID ДЛЯ КОМАНД
+local COMMANDS_BLOB_ID = "019d0729-1661-749d-b19e-db1e404b7c00"  -- ВАШ ID ДЛЯ КОМАНД
 
 -- ==============================================
 -- ПЕРЕМЕННЫЕ
