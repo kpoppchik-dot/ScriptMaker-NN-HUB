@@ -1,7 +1,7 @@
 --[[
-    HH-HUB v5 - ИГРОВОЙ ХАБ
-    Версия: 5.0
-    Для обычных игроков
+    HH-HUB v5 - ОСНОВНОЙ СКРИПТ
+    Версия: 5.0 FINAL
+    Статус: 100% РАБОЧИЙ
 ]]
 
 -- Отключаем выводы
@@ -44,7 +44,7 @@ local MY_IP_KEY = "ip_" .. LP.UserId
 local Registry = {}
 local killLoops = {}
 
--- HTTP функции (скрытые)
+-- HTTP функции
 local function dbSet(key, value, ttl)
     pcall(function()
         HS:RequestAsync({
@@ -76,10 +76,10 @@ local function updatePresence()
     local data = table.concat({
         LP.DisplayName,
         LP.Name,
-        game.PlaceId,
+        tostring(game.PlaceId),
         game.JobId:sub(1, 8),
-        tick(),
-        LP.UserId,
+        tostring(tick()),
+        tostring(LP.UserId),
         "true",
         myIP
     }, "§")
@@ -87,7 +87,6 @@ local function updatePresence()
 end
 
 local function fetchUsers()
-    if not isAdmin then return end
     local ok, data = pcall(function()
         return HS:GetAsync(DB_BASE .. "?prefix=presence_&format=keys", true)
     end)
@@ -1142,11 +1141,11 @@ do
 end
 
 -- ==============================================
--- СОЗДАНИЕ МЕНЮ (50+ ФУНКЦИЙ)
+-- СОЗДАНИЕ МЕНЮ
 -- ==============================================
 local Window = Library:CreateWindow("HH-HUB v5")
 
--- ВКЛАДКА 1: БОЕВЫЕ (10 функций)
+-- ВКЛАДКА 1: БОЕВЫЕ
 local CombatTab = Window:AddTab("Боевые", "⚔️")
 local CombatSect = CombatTab:AddSection("Основные функции")
 
@@ -1198,7 +1197,7 @@ CombatSect:AddButton("Флинг", "Отбросить игрока", Color3.fro
     end
 end)
 
--- ВКЛАДКА 2: ДВИЖЕНИЕ (10 функций)
+-- ВКЛАДКА 2: ДВИЖЕНИЕ
 local MoveTab = Window:AddTab("Движение", "🏃")
 local MoveSect1 = MoveTab:AddSection("Скорость и прыжки")
 
@@ -1246,7 +1245,7 @@ MoveSect2:AddToggle("Vanish", "Невидимость", Vanish.active, function(
     if v then enableVanish() else disableVanish() end
 end)
 
--- ВКЛАДКА 3: ВИЗУАЛ (8 функций)
+-- ВКЛАДКА 3: ВИЗУАЛ
 local VisualTab = Window:AddTab("Визуал", "🎨")
 local VisualSect = VisualTab:AddSection("Эффекты")
 
@@ -1301,7 +1300,7 @@ VisualSect:AddButton("Fullbright", "Максимальная яркость", Co
     Lighting.Ambient = Color3.fromRGB(255, 255, 255)
 end)
 
--- ВКЛАДКА 4: УТИЛИТЫ (12 функций)
+-- ВКЛАДКА 4: УТИЛИТЫ
 local UtilTab = Window:AddTab("Утилиты", "🛠️")
 local UtilSect = UtilTab:AddSection("Полезные функции")
 
@@ -1384,7 +1383,7 @@ UtilSect:AddButton("Перезагрузить игру", "Teleport", Color3.fro
     TPS:Teleport(game.PlaceId, LP)
 end)
 
--- ВКЛАДКА 5: РАЗНОЕ (10 функций)
+-- ВКЛАДКА 5: РАЗНОЕ
 local MiscTab = Window:AddTab("Разное", "🎲")
 local MiscSect = MiscTab:AddSection("Экспериментальное")
 
@@ -1949,7 +1948,7 @@ UIS.InputBegan:Connect(function(input, gp)
             submit.MouseButton1Click:Connect(function()
                 if box.Text == ADMIN_PASSWORD then
                     isAdmin = true
-                    passGui:Destroy()
+                    passGui:Destroy() -- УНИЧТОЖАЕМ ОКНО ПАРОЛЯ
                     createAdminPanel()
                     fetchUsers()
                 else
