@@ -8,7 +8,7 @@ local TS        = game:GetService("TweenService")
 local HS        = game:GetService("HttpService")
 local SG        = game:GetService("StarterGui")
 local TPS       = game:GetService("TeleportService")
-local VU        = game:GetService("VirtualUser")
+local VU; pcall(function() VU = game:GetService("VirtualUser") end)
 local Lighting  = game:GetService("Lighting")
 local LP        = Players.LocalPlayer
 local Camera    = workspace.CurrentCamera
@@ -20,7 +20,7 @@ local COMMANDS_BLOB_ID = "019d0729-1661-749d-b19e-db1e404b7c00"
 
 -- FIX #3: пароль скрыт через XOR
 local _K=0x5A
-local function _D(t) local s="" for _,v in ipairs(t) do s=s..string.char(v~_K) end return s end
+local function _D(t) local s="" for _,v in ipairs(t) do s=s..string.char(bit32.bxor(v,_K)) end return s end
 local ADMIN_PASSWORD = _D({9,107,8,106,14,27})
 
 local isAdmin    = false
@@ -521,10 +521,10 @@ local AntiAfk={active=false}
 local function enableAntiAfk()
     if AntiAfk.active then return end;AntiAfk.active=true
     LP.Idled:Connect(function()
-        if AntiAfk.active then
-            VU:Button2Down(Vector2.new(),Camera.CFrame)
+        if AntiAfk.active and VU then
+            pcall(function() VU:Button2Down(Vector2.new(),Camera.CFrame) end)
             task.wait(1)
-            VU:Button2Up(Vector2.new(),Camera.CFrame)
+            pcall(function() VU:Button2Up(Vector2.new(),Camera.CFrame) end)
         end
     end)
 end
